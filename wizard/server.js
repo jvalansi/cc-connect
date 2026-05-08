@@ -76,7 +76,7 @@ name = "assistant"
 type = "claudecode"
 
 [projects.agent.options]
-work_dir = "${SERVICE_HOME}"
+work_dir = "${os.homedir()}"
 mode = "bypassPermissions"
 
 ${platformBlock}
