@@ -92,20 +92,50 @@ systemctl daemon-reload
 systemctl enable cc-connect
 info "Service installed and enabled"
 
-# ── setup wizard ─────────────────────────────────────────────────────────────
-section "Launching setup wizard"
+# ── sudoers rule ──────────────────────────────────────────────────────────────
+# Allow the service user to manage cc-connect via systemctl without a password
+# (needed by the setup wizard, which runs as the service user)
+cat > /etc/sudoers.d/cc-connect <<EOF
+${SERVICE_USER} ALL=(ALL) NOPASSWD: /bin/systemctl start cc-connect, /bin/systemctl restart cc-connect
+EOF
+chmod 440 /etc/sudoers.d/cc-connect
+info "Sudoers rule written for ${SERVICE_USER}"
+
+# ── setup wizard service ──────────────────────────────────────────────────────
+section "Configuring setup wizard"
 
 WIZARD_SCRIPT="/usr/lib/node_modules/cc-connect/wizard/server.js"
-
-# Fall back to repo location if npm package path doesn't exist yet
 [[ -f "$WIZARD_SCRIPT" ]] || WIZARD_SCRIPT="$(dirname "$(realpath "$0")")/wizard/server.js"
 [[ -f "$WIZARD_SCRIPT" ]] || die "wizard/server.js not found — ensure cc-connect is fully installed"
+
+cat > /etc/systemd/system/cc-connect-wizard.service <<EOF
+[Unit]
+Description=cc-connect setup wizard
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=${SERVICE_USER}
+WorkingDirectory=${CONFIG_DIR}
+ExecStart=${NODE_BIN_DIR}/node ${WIZARD_SCRIPT}
+Environment="PATH=${NODE_BIN_DIR}:${SERVICE_HOME}/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin"
+
+[Install]
+WantedBy=multi-user.target
+EOF
 
 # Open firewall port for wizard
 if command -v ufw &>/dev/null && ufw status 2>/dev/null | grep -q "Status: active"; then
     ufw allow 8080/tcp comment "cc-connect wizard" >/dev/null
 fi
 
+systemctl daemon-reload
+systemctl enable cc-connect-wizard
+systemctl restart cc-connect-wizard
+info "Wizard service started"
+
+# ── done ─────────────────────────────────────────────────────────────────────
 SERVER_IP=$(curl -s --max-time 3 ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')
 
 echo ""
@@ -119,15 +149,3 @@ echo "  The wizard will guide you through:"
 echo "  • Claude login"
 echo "  • Connecting your messaging platform"
 echo -e "${BOLD}${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-echo ""
-
-if [[ "$UNATTENDED" == "true" ]]; then
-    echo -e "${BOLD}${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${BOLD}  Installation complete (unattended)${NC}"
-    echo "  Wizard will be available at: http://${SERVER_IP}:8080"
-    echo "  Start the wizard: node ${WIZARD_SCRIPT}"
-    echo -e "${BOLD}${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-else
-    # Run wizard as service user (blocks until Ctrl-C or wizard completes)
-    sudo -u "$SERVICE_USER" node "$WIZARD_SCRIPT"
-fi

@@ -365,8 +365,11 @@ const server = http.createServer(async (req, res) => {
 
             writeConfig(platform, tokens);
 
-            try { execSync('systemctl restart cc-connect', { stdio: 'pipe' }); }
-            catch { execSync('systemctl start cc-connect', { stdio: 'pipe' }); }
+            try { execSync('sudo systemctl restart cc-connect', { stdio: 'pipe' }); }
+            catch { execSync('sudo systemctl start cc-connect', { stdio: 'pipe' }); }
+
+            // Shut the wizard down — setup is complete
+            setTimeout(() => process.exit(0), 2000);
 
             res.writeHead(200, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ ok: true }));
