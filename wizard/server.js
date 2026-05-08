@@ -11,20 +11,22 @@ const PORT = process.env.WIZARD_PORT || 8080;
 const SERVICE_HOME = os.homedir();
 const CONFIG_DIR = path.join(SERVICE_HOME, '.cc-connect');
 const CONFIG_FILE = path.join(CONFIG_DIR, 'config.toml');
+const ENV_FILE = path.join(CONFIG_DIR, 'agent.env');
 
-function findClaude() {
-    try { return execSync('which claude', { encoding: 'utf8' }).trim(); } catch {}
-    for (const c of [
-        path.join(SERVICE_HOME, '.local/bin/claude'),
-        '/usr/local/bin/claude',
-        '/usr/bin/claude',
-    ]) { if (fs.existsSync(c)) return c; }
+// ── binary helpers ─────────────────────────────────────────────────────────────
+
+function findBin(name) {
+    try { return execSync(`which ${name}`, { encoding: 'utf8' }).trim(); } catch {}
+    for (const dir of [path.join(SERVICE_HOME, '.local/bin'), '/usr/local/bin', '/usr/bin']) {
+        const p = path.join(dir, name);
+        if (fs.existsSync(p)) return p;
+    }
     return null;
 }
 
-function isAuthenticated() {
+function isClaudeAuthenticated() {
     try {
-        const claude = findClaude();
+        const claude = findBin('claude');
         if (!claude) return false;
         const out = execSync(`${claude} auth status 2>&1`, { encoding: 'utf8' });
         try {
@@ -36,8 +38,44 @@ function isAuthenticated() {
     } catch { return false; }
 }
 
-function writeConfig(platform, tokens) {
+// ── config writers ─────────────────────────────────────────────────────────────
+
+function writeAgentEnv(agent, apiKey) {
     fs.mkdirSync(CONFIG_DIR, { recursive: true });
+    if (agent === 'gemini') {
+        fs.writeFileSync(ENV_FILE, `GEMINI_API_KEY=${apiKey}\n`, { mode: 0o600 });
+    } else if (agent === 'codex') {
+        fs.writeFileSync(ENV_FILE, `OPENAI_API_KEY=${apiKey}\n`, { mode: 0o600 });
+    } else {
+        try { fs.unlinkSync(ENV_FILE); } catch {}
+    }
+}
+
+function writeConfig(agent, platform, tokens) {
+    fs.mkdirSync(CONFIG_DIR, { recursive: true });
+
+    const agentBlocks = {
+        claudecode: `[projects.agent]
+type = "claudecode"
+
+[projects.agent.options]
+work_dir = "${SERVICE_HOME}"
+mode = "bypassPermissions"`,
+        gemini: `[projects.agent]
+type = "gemini"
+
+[projects.agent.options]
+work_dir = "${SERVICE_HOME}"
+mode = "yolo"`,
+        codex: `[projects.agent]
+type = "codex"
+
+[projects.agent.options]
+work_dir = "${SERVICE_HOME}"
+mode = "full-auto"`,
+    };
+
+    const agentBlock = agentBlocks[agent] || agentBlocks.claudecode;
 
     let platformBlock;
     if (platform === 'telegram') {
@@ -72,19 +110,14 @@ tool_messages = false
 [[projects]]
 name = "assistant"
 
-[projects.agent]
-type = "claudecode"
-
-[projects.agent.options]
-work_dir = "${os.homedir()}"
-mode = "bypassPermissions"
+${agentBlock}
 
 ${platformBlock}
 `;
     fs.writeFileSync(CONFIG_FILE, config, { mode: 0o600 });
 }
 
-// ── HTML ──────────────────────────────────────────────────────────────────────
+// ── HTML ───────────────────────────────────────────────────────────────────────
 const HTML = `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -99,7 +132,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .header h1{font-size:1.5rem;font-weight:700;color:#fff}
 .header p{color:rgba(255,255,255,.8);margin-top:.25rem;font-size:.9rem}
 .tabs{display:flex;border-bottom:1px solid #2d3748}
-.tab{flex:1;padding:.75rem;text-align:center;font-size:.75rem;color:#4a5568;border-bottom:2px solid transparent;transition:all .2s}
+.tab{flex:1;padding:.75rem;text-align:center;font-size:.7rem;color:#4a5568;border-bottom:2px solid transparent;transition:all .2s}
 .tab.active{color:#667eea;border-bottom-color:#667eea}
 .tab.done{color:#48bb78;border-bottom-color:#48bb78}
 .body{padding:2rem}
@@ -121,14 +154,19 @@ input:focus{border-color:#667eea}
 .alert-success{background:#1c4532;border:1px solid #276749;color:#9ae6b4;padding:.75rem 1rem;border-radius:8px;margin-bottom:1rem;font-size:.875rem}
 .spinner{display:inline-block;width:14px;height:14px;border:2px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:spin .8s linear infinite;vertical-align:middle;margin-right:.4rem}
 @keyframes spin{to{transform:rotate(360deg)}}
-.platform-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:.75rem;margin-bottom:1.25rem}
-.plat{padding:.75rem;background:#0f1117;border:2px solid #2d3748;border-radius:8px;text-align:center;cursor:pointer;transition:all .2s;font-size:.85rem;color:#a0aec0}
-.plat:hover{border-color:#667eea;color:#fff}
-.plat.selected{border-color:#667eea;background:#1a1f2e;color:#fff}
-.plat .icon{font-size:1.4rem;display:block;margin-bottom:.25rem}
+.agent-grid,.platform-grid{display:grid;gap:.75rem;margin-bottom:1.25rem}
+.agent-grid{grid-template-columns:repeat(3,1fr)}
+.platform-grid{grid-template-columns:repeat(3,1fr)}
+.tile{padding:.75rem;background:#0f1117;border:2px solid #2d3748;border-radius:8px;text-align:center;cursor:pointer;transition:all .2s;font-size:.85rem;color:#a0aec0}
+.tile:hover{border-color:#667eea;color:#fff}
+.tile.selected{border-color:#667eea;background:#1a1f2e;color:#fff}
+.tile .icon{font-size:1.4rem;display:block;margin-bottom:.25rem}
+.tile .sub{font-size:.7rem;color:#4a5568;margin-top:.2rem}
+.tile.selected .sub{color:#a0aec0}
 .success-icon{font-size:3rem;text-align:center;margin-bottom:1rem}
 .slack-extra{display:none}.slack-extra.show{display:block}
 code{background:#0f1117;padding:.1em .3em;border-radius:4px;font-size:.85em}
+a{color:#63b3ed}
 </style>
 </head>
 <body>
@@ -139,47 +177,95 @@ code{background:#0f1117;padding:.1em .3em;border-radius:4px;font-size:.85em}
   </div>
   <div class="tabs">
     <div class="tab active" id="tab1">1. Welcome</div>
-    <div class="tab" id="tab2">2. Claude Login</div>
-    <div class="tab" id="tab3">3. Platform</div>
-    <div class="tab" id="tab4">4. Done</div>
+    <div class="tab" id="tab2">2. Agent</div>
+    <div class="tab" id="tab3">3. Login</div>
+    <div class="tab" id="tab4">4. Platform</div>
+    <div class="tab" id="tab5">5. Done</div>
   </div>
   <div class="body">
 
+    <!-- Step 1: Welcome -->
     <div class="step active" id="s1">
       <h2>Welcome</h2>
-      <p>This wizard connects your <strong style="color:#e2e8f0">Claude Pro or Max subscription</strong> to a messaging platform so you can chat with your AI assistant 24/7 — no credits, just your flat monthly plan.</p>
+      <p>This wizard connects an AI coding agent to a messaging platform so you can chat 24/7 from Telegram, Discord, or Slack.</p>
       <p>You'll need:<br>
-        • A Claude subscription at <strong style="color:#e2e8f0">claude.ai</strong><br>
-        • A bot token for Telegram, Discord, or Slack</p>
+        • A <strong style="color:#e2e8f0">Claude subscription</strong> (claude.ai) <em>or</em> a <strong style="color:#e2e8f0">Gemini/OpenAI API key</strong><br>
+        • A bot token for your messaging platform</p>
       <button class="btn btn-primary" onclick="goTo(2)">Get Started →</button>
     </div>
 
+    <!-- Step 2: Agent selection -->
     <div class="step" id="s2">
-      <h2>Log in to Claude</h2>
-      <p>Click below to start the login flow. A link will appear — open it in your browser, sign in, then come back here.</p>
-      <div class="terminal" id="auth-out">Ready. Press Start Login to begin.</div>
-      <div class="url-box" id="auth-url-box" style="display:none">
-        <strong>Open this link in your browser:</strong><br>
-        <a id="auth-url-link" href="#" target="_blank"></a>
-      </div>
-      <div id="auth-code-box" style="display:none">
-        <label>Paste the code from the browser here:</label>
-        <div style="display:flex;gap:.5rem">
-          <input type="text" id="auth-code" placeholder="Paste code…" autocomplete="off" style="margin-bottom:0;flex:1">
-          <button class="btn btn-primary" onclick="submitCode()" style="width:auto;padding:.65rem 1rem">Submit</button>
+      <h2>Choose your AI agent</h2>
+      <p>Pick the AI you want to chat with.</p>
+      <div class="agent-grid">
+        <div class="tile" id="agent-claudecode" onclick="pickAgent('claudecode')">
+          <span class="icon">🤖</span>Claude
+          <div class="sub">Subscription</div>
+        </div>
+        <div class="tile" id="agent-gemini" onclick="pickAgent('gemini')">
+          <span class="icon">✨</span>Gemini
+          <div class="sub">API key</div>
+        </div>
+        <div class="tile" id="agent-codex" onclick="pickAgent('codex')">
+          <span class="icon">⚡</span>OpenAI
+          <div class="sub">API key</div>
         </div>
       </div>
-      <button class="btn btn-primary" id="auth-btn" onclick="startAuth()">Start Login</button>
-      <button class="btn btn-secondary" id="already-btn" onclick="checkAuth()" style="display:none">I've already logged in → Continue</button>
+      <button class="btn btn-primary" id="agent-next-btn" onclick="agentNext()" disabled>Continue →</button>
     </div>
 
+    <!-- Step 3: Auth (branches by agent) -->
     <div class="step" id="s3">
+
+      <!-- Claude OAuth -->
+      <div id="auth-claude" style="display:none">
+        <h2>Log in to Claude</h2>
+        <p>Click below to start the login flow. A link will appear — open it in your browser, sign in, then come back here.</p>
+        <div class="terminal" id="auth-out">Ready. Press Start Login to begin.</div>
+        <div class="url-box" id="auth-url-box" style="display:none">
+          <strong>Open this link in your browser:</strong><br>
+          <a id="auth-url-link" href="#" target="_blank"></a>
+        </div>
+        <div id="auth-code-box" style="display:none">
+          <label>Paste the code from the browser here:</label>
+          <div style="display:flex;gap:.5rem">
+            <input type="text" id="auth-code" placeholder="Paste code…" autocomplete="off" style="margin-bottom:0;flex:1">
+            <button class="btn btn-primary" onclick="submitCode()" style="width:auto;padding:.65rem 1rem">Submit</button>
+          </div>
+        </div>
+        <button class="btn btn-primary" id="auth-btn" onclick="startAuth()">Start Login</button>
+        <button class="btn btn-secondary" id="already-btn" onclick="checkAuth()" style="display:none">I've already logged in → Continue</button>
+      </div>
+
+      <!-- Gemini API key -->
+      <div id="auth-gemini" style="display:none">
+        <h2>Gemini API Key</h2>
+        <p>Get your key from <a href="https://aistudio.google.com/app/apikey" target="_blank">Google AI Studio</a>. It's free to start.</p>
+        <label>API Key</label>
+        <input type="password" id="gemini-key" placeholder="AIza…" autocomplete="off">
+        <button class="btn btn-primary" onclick="continueWithKey('gemini')">Continue →</button>
+      </div>
+
+      <!-- OpenAI API key -->
+      <div id="auth-codex" style="display:none">
+        <h2>OpenAI API Key</h2>
+        <p>Get your key from <a href="https://platform.openai.com/api-keys" target="_blank">OpenAI Platform</a>.</p>
+        <label>API Key</label>
+        <input type="password" id="codex-key" placeholder="sk-…" autocomplete="off">
+        <button class="btn btn-primary" onclick="continueWithKey('codex')">Continue →</button>
+      </div>
+
+    </div>
+
+    <!-- Step 4: Platform -->
+    <div class="step" id="s4">
       <h2>Connect a platform</h2>
       <p>Choose where you want to chat with your assistant.</p>
       <div class="platform-grid">
-        <div class="plat" id="plat-telegram" onclick="pickPlat('telegram')"><span class="icon">✈️</span>Telegram</div>
-        <div class="plat" id="plat-discord"  onclick="pickPlat('discord')"><span class="icon">🎮</span>Discord</div>
-        <div class="plat" id="plat-slack"    onclick="pickPlat('slack')"><span class="icon">💼</span>Slack</div>
+        <div class="tile" id="plat-telegram" onclick="pickPlat('telegram')"><span class="icon">✈️</span>Telegram</div>
+        <div class="tile" id="plat-discord"  onclick="pickPlat('discord')"><span class="icon">🎮</span>Discord</div>
+        <div class="tile" id="plat-slack"    onclick="pickPlat('slack')"><span class="icon">💼</span>Slack</div>
       </div>
       <div id="token-form" style="display:none">
         <div id="hint-telegram" style="display:none"><p>Message <strong>@BotFather</strong> on Telegram → <code>/newbot</code> → copy the token.</p></div>
@@ -195,10 +281,11 @@ code{background:#0f1117;padding:.1em .3em;border-radius:4px;font-size:.85em}
       </div>
     </div>
 
-    <div class="step" id="s4">
+    <!-- Step 5: Done -->
+    <div class="step" id="s5">
       <div class="success-icon">🎉</div>
       <h2 style="text-align:center">You're live!</h2>
-      <p style="text-align:center">cc-connect is running. Send a message to your bot to start chatting with Claude.</p>
+      <p style="text-align:center">cc-connect is running. Send a message to your bot to start chatting.</p>
       <div class="alert-success" id="done-msg"></div>
       <p style="font-size:.8rem;color:#4a5568;margin-top:1rem">
         Logs: <code>sudo journalctl -u cc-connect -f</code><br>
@@ -210,6 +297,8 @@ code{background:#0f1117;padding:.1em .3em;border-radius:4px;font-size:.85em}
 </div>
 <script>
 let step = 1;
+let selectedAgent = null;
+let apiKey = '';
 let plat = null;
 
 function goTo(n) {
@@ -220,6 +309,27 @@ function goTo(n) {
   document.getElementById('s' + n).classList.add('active');
   document.getElementById('tab' + n).classList.add('active');
 }
+
+// ── Agent selection ────────────────────────────────────────────────────────────
+
+function pickAgent(a) {
+  selectedAgent = a;
+  ['claudecode','gemini','codex'].forEach(x =>
+    document.getElementById('agent-' + x).classList.toggle('selected', x === a)
+  );
+  document.getElementById('agent-next-btn').disabled = false;
+}
+
+function agentNext() {
+  goTo(3);
+  ['claude','gemini','codex'].forEach(x =>
+    document.getElementById('auth-' + x).style.display = 'none'
+  );
+  const key = selectedAgent === 'claudecode' ? 'claude' : selectedAgent;
+  document.getElementById('auth-' + key).style.display = 'block';
+}
+
+// ── Claude OAuth ───────────────────────────────────────────────────────────────
 
 function startAuth() {
   const btn = document.getElementById('auth-btn');
@@ -250,7 +360,7 @@ function startAuth() {
       es.close();
       if (d.success) {
         out.textContent += '\\n✓ Logged in!';
-        setTimeout(() => goTo(3), 800);
+        setTimeout(() => goTo(4), 800);
       } else {
         btn.disabled = false;
         btn.textContent = 'Retry Login';
@@ -280,10 +390,21 @@ function submitCode() {
 
 function checkAuth() {
   fetch('/api/auth/status').then(r => r.json()).then(d => {
-    if (d.authenticated) goTo(3);
+    if (d.authenticated) goTo(4);
     else alert('Not logged in yet — complete the browser login first.');
   });
 }
+
+// ── API key (Gemini / Codex) ───────────────────────────────────────────────────
+
+function continueWithKey(agent) {
+  const val = document.getElementById(agent + '-key').value.trim();
+  if (!val) return alert('Paste your API key first');
+  apiKey = val;
+  goTo(4);
+}
+
+// ── Platform ───────────────────────────────────────────────────────────────────
 
 function pickPlat(p) {
   plat = p;
@@ -300,7 +421,8 @@ function configure() {
   if (!plat) return alert('Choose a platform first');
   const token = document.getElementById('token').value.trim();
   if (!token) return alert('Paste your bot token');
-  const body = { platform: plat, token };
+  const body = { agent: selectedAgent, platform: plat, token };
+  if (selectedAgent !== 'claudecode') body.api_key = apiKey;
   if (plat === 'slack') {
     body.app_token = document.getElementById('app-token').value.trim();
     if (!body.app_token) return alert('App token required for Slack');
@@ -311,9 +433,11 @@ function configure() {
     body: JSON.stringify(body),
   }).then(r => r.json()).then(d => {
     if (d.ok) {
+      const agentNames = { claudecode: 'Claude', gemini: 'Gemini', codex: 'OpenAI Codex' };
       document.getElementById('done-msg').textContent =
-        'Platform: ' + plat.charAt(0).toUpperCase() + plat.slice(1) + ' — service started ✓';
-      goTo(4);
+        'Agent: ' + (agentNames[selectedAgent] || selectedAgent) +
+        ' — Platform: ' + plat.charAt(0).toUpperCase() + plat.slice(1) + ' ✓';
+      goTo(5);
     } else {
       alert('Error: ' + (d.error || 'unknown'));
     }
@@ -323,9 +447,9 @@ function configure() {
 </body>
 </html>`;
 
-let authProc = null; // running claude auth login process
+let authProc = null;
 
-// ── HTTP server ───────────────────────────────────────────────────────────────
+// ── HTTP server ────────────────────────────────────────────────────────────────
 function parseBody(req) {
     return new Promise((resolve, reject) => {
         let body = '';
@@ -347,7 +471,7 @@ const server = http.createServer(async (req, res) => {
 
     if (method === 'GET' && url === '/api/auth/status') {
         res.writeHead(200, { 'Content-Type': 'application/json' });
-        return res.end(JSON.stringify({ authenticated: isAuthenticated() }));
+        return res.end(JSON.stringify({ authenticated: isClaudeAuthenticated() }));
     }
 
     if (method === 'GET' && url === '/api/auth/stream') {
@@ -358,7 +482,7 @@ const server = http.createServer(async (req, res) => {
         });
 
         const send = obj => res.write(`data: ${JSON.stringify(obj)}\n\n`);
-        const claude = findClaude();
+        const claude = findBin('claude');
 
         if (!claude) {
             send({ line: 'ERROR: claude binary not found. Re-run install.sh.', done: true, success: false });
@@ -374,7 +498,7 @@ const server = http.createServer(async (req, res) => {
         proc.stderr.on('data', d => d.toString().split('\n').filter(Boolean).forEach(l => send({ line: l })));
         proc.on('close', () => {
             authProc = null;
-            send({ done: true, success: isAuthenticated() });
+            send({ done: true, success: isClaudeAuthenticated() });
             res.end();
         });
         req.on('close', () => { if (proc === authProc) proc.kill(); });
@@ -398,8 +522,15 @@ const server = http.createServer(async (req, res) => {
     if (method === 'POST' && url === '/api/configure') {
         try {
             const body = await parseBody(req);
-            const { platform, token, app_token } = body;
+            const { agent, platform, token, app_token, api_key } = body;
             if (!platform || !token) throw new Error('Missing platform or token');
+
+            const validAgents = ['claudecode', 'gemini', 'codex'];
+            const resolvedAgent = validAgents.includes(agent) ? agent : 'claudecode';
+
+            if (resolvedAgent !== 'claudecode' && !api_key) {
+                throw new Error('API key required for ' + resolvedAgent);
+            }
 
             const tokens = { token };
             if (platform === 'slack') {
@@ -409,12 +540,12 @@ const server = http.createServer(async (req, res) => {
                 delete tokens.token;
             }
 
-            writeConfig(platform, tokens);
+            writeAgentEnv(resolvedAgent, api_key || '');
+            writeConfig(resolvedAgent, platform, tokens);
 
             try { execSync('sudo systemctl restart cc-connect', { stdio: 'pipe' }); }
             catch { execSync('sudo systemctl start cc-connect', { stdio: 'pipe' }); }
 
-            // Shut the wizard down — setup is complete
             setTimeout(() => process.exit(0), 2000);
 
             res.writeHead(200, { 'Content-Type': 'application/json' });

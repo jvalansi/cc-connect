@@ -69,6 +69,15 @@ CLAUDE_BIN=$(sudo -u "$SERVICE_USER" bash -lc "which claude 2>/dev/null" \
 [[ -n "$CLAUDE_BIN" ]] || die "Could not locate claude binary after installation"
 info "Claude Code installed  →  ${CLAUDE_BIN}"
 
+# ── Optional AI agent CLIs ────────────────────────────────────────────────────
+section "Installing optional AI agent CLIs"
+
+sudo -u "$SERVICE_USER" npm install -g @google/gemini-cli --silent 2>/dev/null \
+    && info "Gemini CLI installed" || warn "Gemini CLI install skipped (optional)"
+
+sudo -u "$SERVICE_USER" npm install -g @openai/codex --silent 2>/dev/null \
+    && info "OpenAI Codex CLI installed" || warn "OpenAI Codex CLI install skipped (optional)"
+
 # ── systemd service ───────────────────────────────────────────────────────────
 section "Configuring systemd service"
 
@@ -90,6 +99,7 @@ ExecStart=${CC_BIN}
 Restart=on-failure
 RestartSec=10s
 Environment="PATH=${NODE_BIN_DIR}:${SERVICE_HOME}/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin"
+EnvironmentFile=-${CONFIG_DIR}/agent.env
 
 NoNewPrivileges=true
 PrivateTmp=true
@@ -167,6 +177,7 @@ echo "  Open the setup wizard in your browser:"
 echo -e "  ${BOLD}http://${SERVER_IP}:8080${NC}"
 echo ""
 echo "  The wizard will guide you through:"
-echo "  • Claude login"
+echo "  • Choosing your AI (Claude, Gemini, or OpenAI Codex)"
+echo "  • Logging in or entering your API key"
 echo "  • Connecting your messaging platform"
 echo -e "${BOLD}${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
