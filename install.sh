@@ -15,7 +15,15 @@ section() { echo -e "\n${BOLD}${CYAN}━━  $*${NC}"; }
 # ── root check ────────────────────────────────────────────────────────────────
 [[ $EUID -eq 0 ]] || die "Run with sudo: curl -fsSL <url> | sudo bash"
 
-SERVICE_USER="${SUDO_USER:-ubuntu}"
+SERVICE_USER="${SUDO_USER:-}"
+# Fall back: prefer 'ubuntu' if it exists, otherwise use root
+if [[ -z "$SERVICE_USER" ]] || ! getent passwd "$SERVICE_USER" &>/dev/null; then
+    if getent passwd ubuntu &>/dev/null; then
+        SERVICE_USER="ubuntu"
+    else
+        SERVICE_USER="root"
+    fi
+fi
 SERVICE_HOME=$(getent passwd "$SERVICE_USER" | cut -d: -f6)
 CONFIG_DIR="${SERVICE_HOME}/.cc-connect"
 CONFIG_FILE="${CONFIG_DIR}/config.toml"
