@@ -113,8 +113,15 @@ info "Sudoers rule written for ${SERVICE_USER}"
 section "Configuring setup wizard"
 
 WIZARD_SCRIPT="/usr/lib/node_modules/cc-connect/wizard/server.js"
-[[ -f "$WIZARD_SCRIPT" ]] || WIZARD_SCRIPT="$(dirname "$(realpath "$0")")/wizard/server.js"
-[[ -f "$WIZARD_SCRIPT" ]] || die "wizard/server.js not found — ensure cc-connect is fully installed"
+if [[ ! -f "$WIZARD_SCRIPT" ]]; then
+    WIZARD_SCRIPT="$(dirname "$(realpath "$0")")/wizard/server.js"
+fi
+if [[ ! -f "$WIZARD_SCRIPT" ]]; then
+    info "Downloading wizard from GitHub…"
+    mkdir -p "$(dirname "$WIZARD_SCRIPT")"
+    WIZARD_URL="https://raw.githubusercontent.com/jvalansi/cc-connect/main/wizard/server.js"
+    curl -fsSL "$WIZARD_URL" -o "$WIZARD_SCRIPT" || die "Failed to download wizard/server.js"
+fi
 
 cat > /etc/systemd/system/cc-connect-wizard.service <<EOF
 [Unit]
