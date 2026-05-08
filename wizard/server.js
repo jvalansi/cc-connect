@@ -157,6 +157,13 @@ code{background:#0f1117;padding:.1em .3em;border-radius:4px;font-size:.85em}
         <strong>Open this link in your browser:</strong><br>
         <a id="auth-url-link" href="#" target="_blank"></a>
       </div>
+      <div id="auth-code-box" style="display:none">
+        <label>Paste the code from the browser here:</label>
+        <div style="display:flex;gap:.5rem">
+          <input type="text" id="auth-code" placeholder="Paste code…" autocomplete="off" style="margin-bottom:0;flex:1">
+          <button class="btn btn-primary" onclick="submitCode()" style="width:auto;padding:.65rem 1rem">Submit</button>
+        </div>
+      </div>
       <button class="btn btn-primary" id="auth-btn" onclick="startAuth()">Start Login</button>
       <button class="btn btn-secondary" id="already-btn" onclick="checkAuth()" style="display:none">I've already logged in → Continue</button>
     </div>
@@ -230,6 +237,9 @@ function startAuth() {
         link.href = m[0];
         link.textContent = m[0];
       }
+      if (/paste code/i.test(d.line)) {
+        document.getElementById('auth-code-box').style.display = 'block';
+      }
     }
     if (d.done) {
       es.close();
@@ -249,6 +259,18 @@ function startAuth() {
     btn.textContent = 'Retry Login';
     document.getElementById('already-btn').style.display = 'block';
   };
+}
+
+function submitCode() {
+  const code = document.getElementById('auth-code').value.trim();
+  if (!code) return;
+  fetch('/api/auth/input', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ code }),
+  });
+  document.getElementById('auth-code-box').style.display = 'none';
+  document.getElementById('auth-out').textContent += '\\n[code submitted, waiting…]\\n';
 }
 
 function checkAuth() {
@@ -296,6 +318,8 @@ function configure() {
 </body>
 </html>`;
 
+let authProc = null; // running claude auth login process
+
 // ── HTTP server ───────────────────────────────────────────────────────────────
 function parseBody(req) {
     return new Promise((resolve, reject) => {
@@ -336,16 +360,33 @@ const server = http.createServer(async (req, res) => {
             return res.end();
         }
 
+        if (authProc) { try { authProc.kill(); } catch {} }
         const proc = spawn(claude, ['auth', 'login', '--claudeai'], {
             env: { ...process.env, TERM: 'dumb' },
         });
+        authProc = proc;
         proc.stdout.on('data', d => d.toString().split('\n').filter(Boolean).forEach(l => send({ line: l })));
         proc.stderr.on('data', d => d.toString().split('\n').filter(Boolean).forEach(l => send({ line: l })));
         proc.on('close', () => {
+            authProc = null;
             send({ done: true, success: isAuthenticated() });
             res.end();
         });
-        req.on('close', () => proc.kill());
+        req.on('close', () => { if (proc === authProc) proc.kill(); });
+        return;
+    }
+
+    if (method === 'POST' && url === '/api/auth/input') {
+        try {
+            const body = await parseBody(req);
+            if (authProc && body.code) {
+                authProc.stdin.write(body.code + '\n');
+            }
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ ok: true }));
+        } catch {
+            res.writeHead(400); res.end('{}');
+        }
         return;
     }
 
