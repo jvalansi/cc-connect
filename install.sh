@@ -123,6 +123,10 @@ if [[ ! -f "$WIZARD_SCRIPT" ]]; then
     curl -fsSL "$WIZARD_URL" -o "$WIZARD_SCRIPT" || die "Failed to download wizard/server.js"
 fi
 
+# Ensure config dir exists so the wizard's WorkingDirectory is valid
+mkdir -p "${CONFIG_DIR}"
+chown "${SERVICE_USER}:${SERVICE_USER}" "${CONFIG_DIR}" 2>/dev/null || true
+
 cat > /etc/systemd/system/cc-connect-wizard.service <<EOF
 [Unit]
 Description=cc-connect setup wizard
