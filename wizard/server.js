@@ -27,7 +27,12 @@ function isAuthenticated() {
         const claude = findClaude();
         if (!claude) return false;
         const out = execSync(`${claude} auth status 2>&1`, { encoding: 'utf8' });
-        return /logged in|authenticated/i.test(out);
+        try {
+            const j = JSON.parse(out);
+            return j.loggedIn === true;
+        } catch {
+            return /logged.?in|authenticated/i.test(out);
+        }
     } catch { return false; }
 }
 
