@@ -16,12 +16,14 @@ section() { echo -e "\n${BOLD}${CYAN}━━  $*${NC}"; }
 [[ $EUID -eq 0 ]] || die "Run with sudo: curl -fsSL <url> | sudo bash"
 
 SERVICE_USER="${SUDO_USER:-}"
-# Fall back: prefer 'ubuntu' if it exists, otherwise use root
+# Resolve or create a non-root service user (Claude Code blocks bypassPermissions as root)
 if [[ -z "$SERVICE_USER" ]] || ! getent passwd "$SERVICE_USER" &>/dev/null; then
     if getent passwd ubuntu &>/dev/null; then
         SERVICE_USER="ubuntu"
     else
-        SERVICE_USER="root"
+        SERVICE_USER="ubuntu"
+        useradd -m -s /bin/bash ubuntu
+        info "Created user 'ubuntu'"
     fi
 fi
 SERVICE_HOME=$(getent passwd "$SERVICE_USER" | cut -d: -f6)
