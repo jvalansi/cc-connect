@@ -224,14 +224,15 @@ a{color:#63b3ed}
         <p>Click below to start the login flow. A link will appear — open it in your browser, sign in, then come back here.</p>
         <div class="terminal" id="auth-out">Ready. Press Start Login to begin.</div>
         <div class="url-box" id="auth-url-box" style="display:none">
-          <strong>Open this link in your browser:</strong><br>
+          <strong>Step 1 — Open this link in your browser and sign in:</strong><br>
           <a id="auth-url-link" href="#" target="_blank"></a>
         </div>
-        <div id="auth-code-box" style="display:none">
-          <label>Paste the code from the browser here:</label>
+        <div id="auth-code-box" style="display:none;margin-top:1rem;padding:1rem;border:2px solid #7c3aed;border-radius:.5rem;background:rgba(124,58,237,.08)">
+          <label style="font-weight:600;font-size:1.05rem">Step 2 — Paste the code Claude gave you:</label>
+          <p style="margin:.25rem 0 .75rem;font-size:.9rem;color:#aaa">After signing in, Claude will show you a short code. Copy it and paste it below.</p>
           <div style="display:flex;gap:.5rem">
-            <input type="text" id="auth-code" placeholder="Paste code…" autocomplete="off" style="margin-bottom:0;flex:1">
-            <button class="btn btn-primary" onclick="submitCode()" style="width:auto;padding:.65rem 1rem">Submit</button>
+            <input type="text" id="auth-code" placeholder="Paste code here…" autocomplete="off" style="margin-bottom:0;flex:1;font-size:1.1rem">
+            <button class="btn btn-primary" onclick="submitCode()" style="width:auto;padding:.65rem 1rem">Submit →</button>
           </div>
         </div>
         <button class="btn btn-primary" id="auth-btn" onclick="startAuth()">Start Login</button>
@@ -351,9 +352,8 @@ function startAuth() {
         box.style.display = 'block';
         link.href = m[0];
         link.textContent = m[0];
-      }
-      if (/paste code/i.test(d.line)) {
         document.getElementById('auth-code-box').style.display = 'block';
+        document.getElementById('auth-code').focus();
       }
     }
     if (d.done) {
