@@ -59,6 +59,10 @@ info "cc-connect $(${CC_BIN} --version 2>&1 | head -1)  →  ${CC_BIN}"
 # ── Claude Code ───────────────────────────────────────────────────────────────
 section "Installing Claude Code"
 
+# Ensure the service user has a user-local npm prefix so global installs don't
+# require root-owned /usr/lib/node_modules / /usr/bin write access.
+sudo -u "$SERVICE_USER" npm config set prefix "${SERVICE_HOME}/.local"
+
 sudo -u "$SERVICE_USER" npm install -g @anthropic-ai/claude-code --silent 2>/dev/null \
     || sudo -u "$SERVICE_USER" npm install -g @anthropic-ai/claude-code
 
