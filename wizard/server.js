@@ -505,6 +505,38 @@ const server = http.createServer(async (req, res) => {
         return;
     }
 
+    if (method === 'GET' && url.startsWith('/oauth/code/callback')) {
+        const params = new URLSearchParams(url.split('?')[1] || '');
+        const code = params.get('code');
+        if (code && authProc) {
+            authProc.stdin.write(code + '\n');
+        }
+        res.writeHead(200, { 'Content-Type': 'text/html' });
+        return res.end(`<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>${code ? 'Authorized' : 'Error'} — cc-connect</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#0f1117;color:#e2e8f0;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:1rem}
+.card{background:#1a1f2e;border:1px solid #2d3748;border-radius:12px;padding:2.5rem 2rem;max-width:400px;width:100%;text-align:center}
+h2{font-size:1.2rem;font-weight:700;margin-bottom:.75rem}
+p{color:#a0aec0;font-size:.9rem;line-height:1.6}
+.icon{font-size:2.5rem;margin-bottom:1rem}
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="icon">${code ? '✅' : '⚠️'}</div>
+  <h2>${code ? 'Authorized!' : 'No code received'}</h2>
+  <p>${code ? 'Code submitted automatically. You can close this tab and return to the setup wizard.' : 'No authorization code found. Please go back and try again.'}</p>
+</div>
+${code ? '<script>setTimeout(()=>window.close(),2500)</script>' : ''}
+</body>
+</html>`);
+    }
+
     if (method === 'POST' && url === '/api/auth/input') {
         try {
             const body = await parseBody(req);
