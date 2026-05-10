@@ -221,18 +221,19 @@ a{color:#63b3ed}
       <!-- Claude OAuth -->
       <div id="auth-claude" style="display:none">
         <h2>Log in to Claude</h2>
-        <p>Click below to start the login flow. A link will appear — open it in your browser, sign in, then come back here.</p>
+        <p>Click <strong style="color:#e2e8f0">Start Login</strong>. A link will appear — open it in a new tab, sign in to Claude, and you'll see a <strong style="color:#e2e8f0">short verification code</strong>. Come back to <strong style="color:#e2e8f0">this tab</strong> and paste that code below.</p>
         <div class="terminal" id="auth-out">Ready. Press Start Login to begin.</div>
         <div class="url-box" id="auth-url-box" style="display:none">
-          <strong>Step 1 — Open this link in your browser and sign in:</strong><br>
-          <a id="auth-url-link" href="#" target="_blank"></a>
+          <strong>Step 1 — Open this link and sign in:</strong><br>
+          <a id="auth-url-link" href="#" target="_blank" style="word-break:break-all"></a><br><br>
+          <strong>Step 2 — After signing in, Claude shows you a code. Copy it.</strong><br><br>
+          <strong>Step 3 — Come back to this tab and paste the code below.</strong>
         </div>
-        <div id="auth-code-box" style="display:none;margin-top:1rem;padding:1rem;border:2px solid #7c3aed;border-radius:.5rem;background:rgba(124,58,237,.08)">
-          <label style="font-weight:600;font-size:1.05rem">Step 2 — Paste the code Claude gave you:</label>
-          <p style="margin:.25rem 0 .75rem;font-size:.9rem;color:#aaa">After signing in, Claude will show you a short code. Copy it and paste it below.</p>
+        <div id="auth-code-box" style="display:none">
+          <label>Paste the verification code from Claude here:</label>
           <div style="display:flex;gap:.5rem">
-            <input type="text" id="auth-code" placeholder="Paste code here…" autocomplete="off" style="margin-bottom:0;flex:1;font-size:1.1rem">
-            <button class="btn btn-primary" onclick="submitCode()" style="width:auto;padding:.65rem 1rem">Submit →</button>
+            <input type="text" id="auth-code" placeholder="Paste code…" autocomplete="off" style="margin-bottom:0;flex:1">
+            <button class="btn btn-primary" onclick="submitCode()" style="width:auto;padding:.65rem 1rem">Submit</button>
           </div>
         </div>
         <button class="btn btn-primary" id="auth-btn" onclick="startAuth()">Start Login</button>
@@ -352,8 +353,9 @@ function startAuth() {
         box.style.display = 'block';
         link.href = m[0];
         link.textContent = m[0];
+      }
+      if (/paste code/i.test(d.line)) {
         document.getElementById('auth-code-box').style.display = 'block';
-        document.getElementById('auth-code').focus();
       }
     }
     if (d.done) {
