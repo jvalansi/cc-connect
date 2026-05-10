@@ -151,7 +151,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=${SERVICE_USER}
+User=root
 WorkingDirectory=${CONFIG_DIR}
 ExecStart=${NODE_BIN_DIR}/node ${WIZARD_SCRIPT}
 Environment="PATH=${NODE_BIN_DIR}:${SERVICE_HOME}/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin"
