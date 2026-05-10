@@ -8,7 +8,12 @@ const path = require('path');
 const os = require('os');
 
 const PORT = process.env.WIZARD_PORT || 8080;
-const SERVICE_HOME = os.homedir();
+// Resolve the service user home — wizard runs as root but cc-connect runs as ubuntu.
+const SERVICE_USER = process.env.SERVICE_USER || 'ubuntu';
+const SERVICE_HOME = (() => {
+    try { return execSync(`getent passwd ${SERVICE_USER} | cut -d: -f6`, { encoding: 'utf8' }).trim(); } catch {}
+    return `/home/${SERVICE_USER}`;
+})();
 const CONFIG_DIR = path.join(SERVICE_HOME, '.cc-connect');
 const CONFIG_FILE = path.join(CONFIG_DIR, 'config.toml');
 const ENV_FILE = path.join(CONFIG_DIR, 'agent.env');
@@ -16,19 +21,24 @@ const ENV_FILE = path.join(CONFIG_DIR, 'agent.env');
 // ── binary helpers ─────────────────────────────────────────────────────────────
 
 function findBin(name) {
-    try { return execSync(`which ${name}`, { encoding: 'utf8' }).trim(); } catch {}
     for (const dir of [path.join(SERVICE_HOME, '.local/bin'), '/usr/local/bin', '/usr/bin']) {
         const p = path.join(dir, name);
         if (fs.existsSync(p)) return p;
     }
+    try { return execSync(`which ${name}`, { encoding: 'utf8' }).trim(); } catch {}
     return null;
+}
+
+function runAs(cmd) {
+    // Run a shell command as the service user (wizard may be root, cc-connect is not).
+    return execSync(`sudo -u ${SERVICE_USER} ${cmd} 2>&1`, { encoding: 'utf8' });
 }
 
 function isClaudeAuthenticated() {
     try {
         const claude = findBin('claude');
         if (!claude) return false;
-        const out = execSync(`${claude} auth status 2>&1`, { encoding: 'utf8' });
+        const out = runAs(`${claude} auth status`);
         try {
             const j = JSON.parse(out);
             return j.loggedIn === true;
@@ -492,8 +502,9 @@ const server = http.createServer(async (req, res) => {
         }
 
         if (authProc) { try { authProc.kill(); } catch {} }
-        const proc = spawn(claude, ['auth', 'login', '--claudeai'], {
-            env: { ...process.env, TERM: 'dumb' },
+        // Run as service user so credentials land in their home, not root's.
+        const proc = spawn('sudo', ['-u', SERVICE_USER, claude, 'auth', 'login', '--claudeai'], {
+            env: { ...process.env, TERM: 'dumb', HOME: SERVICE_HOME },
         });
         authProc = proc;
         proc.stdout.on('data', d => d.toString().split('\n').filter(Boolean).forEach(l => send({ line: l })));
