@@ -597,6 +597,8 @@ ${code ? '<script>setTimeout(()=>window.close(),2500)</script>' : ''}
 
             writeAgentEnv(resolvedAgent, api_key || '');
             writeConfig(resolvedAgent, platform, tokens);
+            // Ensure the service user owns all config files (wizard may run as root).
+            try { execSync(`chown -R ${SERVICE_USER}:${SERVICE_USER} ${CONFIG_DIR}`, { stdio: 'pipe' }); } catch {}
 
             try { execSync('sudo systemctl restart cc-connect', { stdio: 'pipe' }); }
             catch { execSync('sudo systemctl start cc-connect', { stdio: 'pipe' }); }
