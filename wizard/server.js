@@ -352,6 +352,10 @@ function startAuth() {
   btn.disabled = true;
   btn.innerHTML = '<span class="spinner"></span>Waiting for login…';
   out.textContent = '';
+  document.getElementById('auth-url-box').style.display = 'none';
+  document.getElementById('auth-code-box').style.display = 'none';
+  document.getElementById('auth-code').value = '';
+  document.getElementById('already-btn').style.display = 'none';
 
   const es = new EventSource('/api/auth/stream');
   es.onmessage = e => {
@@ -379,6 +383,10 @@ function startAuth() {
       } else {
         btn.disabled = false;
         btn.textContent = 'Retry Login';
+        const isExpired = out.textContent.includes('status code 400');
+        if (isExpired) {
+          out.textContent += '\\n\\n⚠️ The code expired or was already used.\\nClick Retry Login to get a fresh link and a new code.';
+        }
         document.getElementById('already-btn').style.display = 'block';
       }
     }
