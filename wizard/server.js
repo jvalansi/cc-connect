@@ -242,9 +242,10 @@ a{color:#63b3ed}
         <div id="auth-code-box" style="display:none">
           <label>Paste the verification code from Claude here:</label>
           <div style="display:flex;gap:.5rem">
-            <input type="text" id="auth-code" placeholder="Paste code…" autocomplete="off" style="margin-bottom:0;flex:1">
-            <button class="btn btn-primary" onclick="submitCode()" style="width:auto;padding:.65rem 1rem">Submit</button>
+            <input type="text" id="auth-code" placeholder="Paste code…" autocomplete="off" style="margin-bottom:0;flex:1" oninput="validateCode(this)" onpaste="setTimeout(()=>validateCode(this),0)">
+            <button class="btn btn-primary" id="submit-code-btn" onclick="submitCode()" style="width:auto;padding:.65rem 1rem" disabled>Submit</button>
           </div>
+          <div id="code-hint" style="font-size:.8rem;margin-top:.35rem;color:#4a5568"></div>
         </div>
         <button class="btn btn-primary" id="auth-btn" onclick="startAuth()">Start Login</button>
         <button class="btn btn-secondary" id="already-btn" onclick="checkAuth()" style="display:none">I've already logged in → Continue</button>
@@ -355,6 +356,8 @@ function startAuth() {
   document.getElementById('auth-url-box').style.display = 'none';
   document.getElementById('auth-code-box').style.display = 'none';
   document.getElementById('auth-code').value = '';
+  document.getElementById('code-hint').textContent = '';
+  document.getElementById('submit-code-btn').disabled = true;
   document.getElementById('already-btn').style.display = 'none';
 
   const es = new EventSource('/api/auth/stream');
@@ -399,6 +402,26 @@ function startAuth() {
   };
 }
 
+function validateCode(input) {
+  const val = input.value.replace(/\\s/g, '');
+  input.value = val;
+  const hint = document.getElementById('code-hint');
+  const btn = document.getElementById('submit-code-btn');
+  if (val.length === 0) {
+    hint.textContent = '';
+    hint.style.color = '#4a5568';
+    btn.disabled = true;
+  } else if (val.length < 20) {
+    hint.textContent = '\\u26a0\\ufe0f Code looks too short (' + val.length + ' chars) — make sure you copied the full code.';
+    hint.style.color = '#f6ad55';
+    btn.disabled = true;
+  } else {
+    hint.textContent = val.length + ' characters ✓';
+    hint.style.color = '#68d391';
+    btn.disabled = false;
+  }
+}
+
 function submitCode() {
   const code = document.getElementById('auth-code').value.trim();
   if (!code) return;
@@ -408,6 +431,7 @@ function submitCode() {
     body: JSON.stringify({ code }),
   });
   document.getElementById('auth-code-box').style.display = 'none';
+  document.getElementById('submit-code-btn').disabled = true;
   document.getElementById('auth-out').textContent += '\\n[code submitted, waiting…]\\n';
 }
 
