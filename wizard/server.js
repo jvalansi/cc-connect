@@ -299,6 +299,9 @@ a{color:#63b3ed}
       <h2 style="text-align:center">You're live!</h2>
       <p style="text-align:center">cc-connect is running. Send a message to your bot to start chatting.</p>
       <div class="alert-success" id="done-msg"></div>
+      <div id="bot-link-box" style="display:none;text-align:center;margin-bottom:1rem">
+        <a id="bot-link" href="#" target="_blank" class="btn btn-primary" style="display:inline-block;width:auto;padding:.65rem 1.5rem;text-decoration:none">Open your bot →</a>
+      </div>
       <p style="font-size:.8rem;color:#4a5568;margin-top:1rem">
         Logs: <code>sudo journalctl -u cc-connect -f</code><br>
         Restart: <code>sudo systemctl restart cc-connect</code>
@@ -449,6 +452,13 @@ function configure() {
       document.getElementById('done-msg').textContent =
         'Agent: ' + (agentNames[selectedAgent] || selectedAgent) +
         ' — Platform: ' + plat.charAt(0).toUpperCase() + plat.slice(1) + ' ✓';
+      if (d.botUsername) {
+        const linkBox = document.getElementById('bot-link-box');
+        const link = document.getElementById('bot-link');
+        link.href = 'https://t.me/' + d.botUsername;
+        link.textContent = 'Open @' + d.botUsername + ' on Telegram →';
+        linkBox.style.display = 'block';
+      }
       goTo(5);
     } else {
       alert('Error: ' + (d.error || 'unknown'));
@@ -591,10 +601,26 @@ ${code ? '<script>setTimeout(()=>window.close(),2500)</script>' : ''}
             try { execSync('sudo systemctl restart cc-connect', { stdio: 'pipe' }); }
             catch { execSync('sudo systemctl start cc-connect', { stdio: 'pipe' }); }
 
+            // Fetch bot info for Telegram so we can show a deep link.
+            let botUsername = null;
+            if (platform === 'telegram') {
+                try {
+                    const tgRes = await new Promise((resolve, reject) => {
+                        const https = require('https');
+                        https.get(`https://api.telegram.org/bot${token}/getMe`, r => {
+                            let data = '';
+                            r.on('data', c => data += c);
+                            r.on('end', () => resolve(JSON.parse(data)));
+                        }).on('error', reject);
+                    });
+                    if (tgRes.ok) botUsername = tgRes.result.username;
+                } catch {}
+            }
+
             setTimeout(() => process.exit(0), 2000);
 
             res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ ok: true }));
+            res.end(JSON.stringify({ ok: true, botUsername }));
         } catch (e) {
             res.writeHead(400, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ ok: false, error: e.message }));
