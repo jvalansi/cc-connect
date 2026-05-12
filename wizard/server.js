@@ -61,6 +61,20 @@ function writeAgentEnv(agent, apiKey) {
     }
 }
 
+function writeCredsFile(agent, credsJson) {
+    if (agent === 'gemini') {
+        const dir = path.join(SERVICE_HOME, '.gemini');
+        fs.mkdirSync(dir, { recursive: true });
+        fs.writeFileSync(path.join(dir, 'oauth_creds.json'), credsJson, { mode: 0o600 });
+        try { fs.chownSync(path.join(dir, 'oauth_creds.json'), SERVICE_USER, SERVICE_USER); } catch {}
+    } else if (agent === 'codex') {
+        const dir = path.join(SERVICE_HOME, '.codex');
+        fs.mkdirSync(dir, { recursive: true });
+        fs.writeFileSync(path.join(dir, 'auth.json'), credsJson, { mode: 0o600 });
+        try { fs.chownSync(path.join(dir, 'auth.json'), SERVICE_USER, SERVICE_USER); } catch {}
+    }
+}
+
 function writeConfig(agent, platform, tokens) {
     fs.mkdirSync(CONFIG_DIR, { recursive: true });
 
@@ -161,6 +175,11 @@ label{display:block;font-size:.85rem;font-weight:500;margin-bottom:.35rem}
 input,select{width:100%;padding:.65rem .75rem;background:#0f1117;border:1px solid #2d3748;border-radius:8px;color:#e2e8f0;font-size:.9rem;margin-bottom:1rem;outline:none}
 input:focus{border-color:#667eea}
 .hint{font-size:.8rem;color:#4a5568;margin-top:-.75rem;margin-bottom:1rem}
+ol{padding-left:1.25rem;margin-bottom:1rem}
+ol li{color:#a0aec0;font-size:.9rem;line-height:1.8}
+ol li code{color:#e2e8f0}
+textarea{width:100%;padding:.65rem .75rem;background:#0f1117;border:1px solid #2d3748;border-radius:8px;color:#e2e8f0;font-size:.8rem;font-family:monospace;margin-bottom:1rem;outline:none;resize:vertical}
+textarea:focus{border-color:#667eea}
 .alert-success{background:#1c4532;border:1px solid #276749;color:#9ae6b4;padding:.75rem 1rem;border-radius:8px;margin-bottom:1rem;font-size:.875rem}
 .spinner{display:inline-block;width:14px;height:14px;border:2px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:spin .8s linear infinite;vertical-align:middle;margin-right:.4rem}
 @keyframes spin{to{transform:rotate(360deg)}}
@@ -251,22 +270,32 @@ a{color:#63b3ed}
         <button class="btn btn-secondary" id="already-btn" onclick="checkAuth()" style="display:none">I've already logged in → Continue</button>
       </div>
 
-      <!-- Gemini API key -->
+      <!-- Gemini subscription -->
       <div id="auth-gemini" style="display:none">
-        <h2>Gemini API Key</h2>
-        <p>Get your key from <a href="https://aistudio.google.com/app/apikey" target="_blank">Google AI Studio</a>. It's free to start.</p>
-        <label>API Key</label>
-        <input type="password" id="gemini-key" placeholder="AIza…" autocomplete="off">
-        <button class="btn btn-primary" onclick="continueWithKey('gemini')">Continue →</button>
+        <h2>Connect Gemini</h2>
+        <p>Use your <strong style="color:#e2e8f0">Google AI Pro or Ultra</strong> subscription — no API credits needed.</p>
+        <ol>
+          <li>Install Gemini CLI on your computer: <a href="https://github.com/google-gemini/gemini-cli" target="_blank">Setup guide →</a></li>
+          <li>Run <code>gemini</code> and sign in with Google</li>
+          <li>Run <code>cat ~/.gemini/oauth_creds.json</code> and paste the output below</li>
+        </ol>
+        <label>Paste credentials JSON</label>
+        <textarea id="gemini-creds" rows="5" placeholder='{"client_id": "...", "access_token": "..."}'></textarea>
+        <button class="btn btn-primary" onclick="continueWithCreds('gemini')">Continue →</button>
       </div>
 
-      <!-- OpenAI API key -->
+      <!-- Codex subscription -->
       <div id="auth-codex" style="display:none">
-        <h2>OpenAI API Key</h2>
-        <p>Get your key from <a href="https://platform.openai.com/api-keys" target="_blank">OpenAI Platform</a>.</p>
-        <label>API Key</label>
-        <input type="password" id="codex-key" placeholder="sk-…" autocomplete="off">
-        <button class="btn btn-primary" onclick="continueWithKey('codex')">Continue →</button>
+        <h2>Connect OpenAI Codex</h2>
+        <p>Use your <strong style="color:#e2e8f0">ChatGPT Plus, Pro, or higher</strong> subscription — no API credits needed.</p>
+        <ol>
+          <li>Install Codex CLI on your computer: <a href="https://github.com/openai/codex" target="_blank">Setup guide →</a></li>
+          <li>Run <code>codex</code> and sign in with ChatGPT</li>
+          <li>Run <code>cat ~/.codex/auth.json</code> and paste the output below</li>
+        </ol>
+        <label>Paste credentials JSON</label>
+        <textarea id="codex-creds" rows="5" placeholder='{"tokens": {...}}'></textarea>
+        <button class="btn btn-primary" onclick="continueWithCreds('codex')">Continue →</button>
       </div>
 
     </div>
@@ -442,12 +471,13 @@ function checkAuth() {
   });
 }
 
-// ── API key (Gemini / Codex) ───────────────────────────────────────────────────
+// ── Credentials JSON (Gemini / Codex subscription) ────────────────────────────
 
-function continueWithKey(agent) {
-  const val = document.getElementById(agent + '-key').value.trim();
-  if (!val) return alert('Paste your API key first');
-  apiKey = val;
+function continueWithCreds(agent) {
+  const val = document.getElementById(agent + '-creds').value.trim();
+  if (!val) return alert('Paste your credentials JSON first');
+  try { JSON.parse(val); } catch { return alert('Invalid JSON — make sure you copied the full output'); }
+  apiKey = val;  // reuse apiKey slot to carry creds through to configure()
   goTo(4);
 }
 
@@ -627,7 +657,13 @@ ${code ? '<script>setTimeout(()=>window.close(),2500)</script>' : ''}
                 delete tokens.token;
             }
 
-            writeAgentEnv(resolvedAgent, api_key || '');
+            if ((resolvedAgent === 'gemini' || resolvedAgent === 'codex') && api_key) {
+                // api_key carries the credentials JSON for subscription-based auth
+                try { JSON.parse(api_key); writeCredsFile(resolvedAgent, api_key); } catch {}
+                writeAgentEnv(resolvedAgent, '');
+            } else {
+                writeAgentEnv(resolvedAgent, api_key || '');
+            }
             writeConfig(resolvedAgent, platform, tokens);
             // Ensure the service user owns all config files (wizard may run as root).
             try { execSync(`chown -R ${SERVICE_USER}:${SERVICE_USER} ${CONFIG_DIR}`, { stdio: 'pipe' }); } catch {}
