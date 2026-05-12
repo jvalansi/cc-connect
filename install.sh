@@ -30,6 +30,14 @@ SERVICE_HOME=$(getent passwd "$SERVICE_USER" | cut -d: -f6)
 CONFIG_DIR="${SERVICE_HOME}/.cc-connect"
 CONFIG_FILE="${CONFIG_DIR}/config.toml"
 
+# ── Wait for cloud-init ───────────────────────────────────────────────────────
+section "Waiting for system to be ready"
+
+if command -v cloud-init &>/dev/null; then
+    info "Waiting for cloud-init to finish..."
+    cloud-init status --wait >/dev/null 2>&1 || true
+fi
+
 # ── Node.js ───────────────────────────────────────────────────────────────────
 section "Checking Node.js"
 
