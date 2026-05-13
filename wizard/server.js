@@ -544,10 +544,10 @@ function continueWithCreds(agent) {
   let creds;
   try { creds = JSON.parse(val); } catch { return alert('Invalid JSON — make sure you copied the full output'); }
   if (agent === 'gemini' && !creds.refresh_token && !creds.access_token) {
-    return alert('This doesn\'t look like Gemini credentials — expected refresh_token or access_token field. Run: cat ~/.gemini/oauth_creds.json');
+    return alert("Invalid Gemini credentials — expected refresh_token or access_token field. Run: cat ~/.gemini/oauth_creds.json");
   }
   if (agent === 'codex' && !creds.token && !creds.accessToken && !creds.access_token && !creds.api_key) {
-    return alert('This doesn\'t look like Codex credentials — no token field found. Run: cat ~/.codex/auth.json');
+    return alert("Invalid Codex credentials — no token field found. Run: cat ~/.codex/auth.json");
   }
   apiKey = val;
   goTo(4);
