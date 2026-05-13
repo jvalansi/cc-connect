@@ -541,8 +541,15 @@ function checkAuth() {
 function continueWithCreds(agent) {
   const val = document.getElementById(agent + '-creds').value.trim();
   if (!val) return alert('Paste your credentials JSON first');
-  try { JSON.parse(val); } catch { return alert('Invalid JSON — make sure you copied the full output'); }
-  apiKey = val;  // reuse apiKey slot to carry creds through to configure()
+  let creds;
+  try { creds = JSON.parse(val); } catch { return alert('Invalid JSON — make sure you copied the full output'); }
+  if (agent === 'gemini' && !creds.refresh_token && !creds.access_token) {
+    return alert('This doesn\'t look like Gemini credentials — expected refresh_token or access_token field. Run: cat ~/.gemini/oauth_creds.json');
+  }
+  if (agent === 'codex' && !creds.token && !creds.accessToken && !creds.access_token && !creds.api_key) {
+    return alert('This doesn\'t look like Codex credentials — no token field found. Run: cat ~/.codex/auth.json');
+  }
+  apiKey = val;
   goTo(4);
 }
 
@@ -647,6 +654,26 @@ function httpsGet(url, headers = {}) {
             r.on('end', () => { try { resolve({ status: r.statusCode, body: JSON.parse(data) }); } catch { resolve({ status: r.statusCode, body: data }); } });
         }).on('error', reject);
     });
+}
+
+async function validateAgentCreds(agent, credsJson) {
+    const creds = JSON.parse(credsJson);
+    if (agent === 'gemini') {
+        if (!creds.refresh_token && !creds.access_token) {
+            throw new Error('Gemini credentials missing refresh_token — make sure you copied the full JSON from ~/.gemini/oauth_creds.json');
+        }
+        if (creds.access_token) {
+            const r = await httpsGet('https://generativelanguage.googleapis.com/v1beta/models', { Authorization: `Bearer ${creds.access_token}` });
+            if (r.status === 401) throw new Error('Gemini credentials are expired — run `gemini` on your computer again to refresh them, then re-copy the file');
+            if (r.status !== 200) throw new Error(`Gemini API check failed (HTTP ${r.status})`);
+        }
+    } else if (agent === 'codex') {
+        const token = creds.token || creds.accessToken || creds.access_token || creds.api_key;
+        if (!token) throw new Error('Codex credentials missing token field — make sure you copied the full JSON from ~/.codex/auth.json');
+        const r = await httpsGet('https://api.openai.com/v1/models', { Authorization: `Bearer ${token}` });
+        if (r.status === 401) throw new Error('Codex credentials are invalid or expired — run `codex` on your computer again to re-authenticate');
+        if (r.status !== 200) throw new Error(`OpenAI API check failed (HTTP ${r.status})`);
+    }
 }
 
 async function validatePlatformToken(platform, token, app_token) {
@@ -776,7 +803,10 @@ ${code ? '<script>setTimeout(()=>window.close(),2500)</script>' : ''}
             const { agent, platform, token, app_token, api_key } = body;
             if (!platform || !token) throw new Error('Missing platform or token');
 
-            // Validate token against platform API before saving anything
+            // Validate agent credentials and platform token before saving anything
+            if ((resolvedAgent === 'gemini' || resolvedAgent === 'codex') && api_key) {
+                await validateAgentCreds(resolvedAgent, api_key);
+            }
             await validatePlatformToken(platform, token, app_token);
 
             const validAgents = ['claudecode', 'gemini', 'codex'];
