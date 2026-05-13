@@ -271,28 +271,23 @@ a{color:#63b3ed}
         <div class="auth-demo" id="auth-demo">
           <div class="auth-demo-frame active" id="demo-f0">
             <div class="auth-demo-step">Step 1</div>
-            <div class="auth-demo-label">Click <span class="demo-btn">Start Login</span></div>
-            <div class="auth-demo-label" style="color:#4a5568;font-size:.72rem;margin-top:.2rem">A sign-in link appears below</div>
+            <div class="auth-demo-label">Open the link and sign in to Claude</div>
+            <div class="demo-tab-bar" style="margin-top:.3rem">
+              <div class="demo-tab">cc-connect Setup</div>
+              <div class="demo-tab active-tab">claude.com <span class="close">✕</span></div>
+            </div>
+            <div class="demo-popup">claude.com — sign in to continue…</div>
           </div>
           <div class="auth-demo-frame" id="demo-f1">
             <div class="auth-demo-step">Step 2</div>
-            <div class="auth-demo-label">A new tab opens — sign in to Claude</div>
-            <div class="demo-tab-bar" style="margin-top:.2rem">
-              <div class="demo-tab">cc-connect Setup</div>
-              <div class="demo-tab active-tab">claude.ai <span class="close">✕</span></div>
-            </div>
-            <div class="demo-popup">claude.ai — authorising cc-connect…</div>
+            <div class="auth-demo-label">Claude shows a code — copy it</div>
+            <div class="demo-code">A7F3-K9PQ</div>
+            <div class="auth-demo-label" style="color:#4a5568;font-size:.72rem;margin-top:.1rem">then close that tab</div>
           </div>
           <div class="auth-demo-frame" id="demo-f2">
             <div class="auth-demo-step">Step 3</div>
-            <div class="auth-demo-label">Claude shows a code — <em>copy it</em></div>
-            <div class="demo-code" id="demo-code-el">A7F3-K9PQ</div>
-            <div class="auth-demo-label" style="color:#4a5568;font-size:.72rem">then close that tab</div>
-          </div>
-          <div class="auth-demo-frame" id="demo-f3">
-            <div class="auth-demo-step">Step 4</div>
-            <div class="auth-demo-label">Back here — paste the code &amp; submit</div>
-            <div style="display:flex;gap:.35rem;margin-top:.25rem;align-items:center">
+            <div class="auth-demo-label">Come back here — paste the code &amp; submit</div>
+            <div style="display:flex;gap:.35rem;margin-top:.3rem;align-items:center">
               <div style="background:#0f1117;border:1px solid #2d3748;border-radius:5px;padding:.25rem .6rem;font-family:monospace;font-size:.85rem;color:#68d391;letter-spacing:.12em">A7F3-K9PQ</div>
               <div class="demo-btn">Submit</div>
             </div>
@@ -578,7 +573,7 @@ function configure() {
 
 // ── auth demo animation ────────────────────────────────────────────────────────
 (function() {
-  const FRAMES = 4;
+  const FRAMES = 3;
   const HOLD = 4000;
   const CYCLE = FRAMES * HOLD;
   let demoFrame = 0;
