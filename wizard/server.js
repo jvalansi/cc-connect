@@ -813,14 +813,14 @@ ${code ? '<script>setTimeout(()=>window.close(),2500)</script>' : ''}
             const { agent, platform, token, app_token, api_key } = body;
             if (!platform || !token) throw new Error('Missing platform or token');
 
+            const validAgents = ['claudecode', 'gemini', 'codex'];
+            const resolvedAgent = validAgents.includes(agent) ? agent : 'claudecode';
+
             // Validate agent credentials and platform token before saving anything
             if ((resolvedAgent === 'gemini' || resolvedAgent === 'codex') && api_key) {
                 await validateAgentCreds(resolvedAgent, api_key);
             }
             await validatePlatformToken(platform, token, app_token);
-
-            const validAgents = ['claudecode', 'gemini', 'codex'];
-            const resolvedAgent = validAgents.includes(agent) ? agent : 'claudecode';
 
             if (resolvedAgent !== 'claudecode' && !api_key) {
                 throw new Error('API key required for ' + resolvedAgent);
