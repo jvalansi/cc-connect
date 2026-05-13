@@ -431,6 +431,7 @@ function pickAgent(a) {
 }
 
 function agentNext() {
+  if (window._resetDemoAnim) window._resetDemoAnim();
   goTo(3);
   ['claude','gemini','codex'].forEach(x =>
     document.getElementById('auth-' + x).style.display = 'none'
@@ -632,6 +633,15 @@ function configure() {
     if (bar) bar.style.width = ((elapsed % HOLD) / HOLD * 100) + '%';
     requestAnimationFrame(tick);
   }
+
+  window._resetDemoAnim = function() {
+    const prev = document.getElementById('demo-f' + demoFrame);
+    if (prev) prev.classList.remove('active');
+    demoFrame = 0;
+    demoStart = null;
+    const first = document.getElementById('demo-f0');
+    if (first) first.classList.add('active');
+  };
 
   document.addEventListener('DOMContentLoaded', function() {
     if (document.getElementById('auth-demo')) requestAnimationFrame(tick);
