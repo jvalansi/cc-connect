@@ -218,7 +218,7 @@ a{color:#63b3ed}
       <h2>Welcome</h2>
       <p>This wizard connects an AI coding agent to a messaging platform so you can chat 24/7 from Telegram, Discord, or Slack.</p>
       <p>You'll need:<br>
-        • A <strong style="color:#e2e8f0">Claude subscription</strong> (claude.ai) <em>or</em> a <strong style="color:#e2e8f0">Gemini/OpenAI API key</strong><br>
+        • A <strong style="color:#e2e8f0">Claude</strong> (claude.ai), <strong style="color:#e2e8f0">Gemini</strong> (Google AI), or <strong style="color:#e2e8f0">OpenAI</strong> (ChatGPT) subscription<br>
         • A bot token for your messaging platform</p>
       <button class="btn btn-primary" onclick="goTo(2)">Get Started →</button>
     </div>
@@ -234,11 +234,11 @@ a{color:#63b3ed}
         </div>
         <div class="tile" id="agent-gemini" onclick="pickAgent('gemini')">
           <span class="icon">✨</span>Gemini
-          <div class="sub">API key</div>
+          <div class="sub">Subscription</div>
         </div>
         <div class="tile" id="agent-codex" onclick="pickAgent('codex')">
           <span class="icon">⚡</span>OpenAI
-          <div class="sub">API key</div>
+          <div class="sub">Subscription</div>
         </div>
       </div>
       <button class="btn btn-primary" id="agent-next-btn" onclick="agentNext()" disabled>Continue →</button>
