@@ -384,7 +384,7 @@ a{color:#63b3ed}
           <label>App Token (xapp-…)</label>
           <input type="password" id="app-token" placeholder="xapp-…" autocomplete="off">
         </div>
-        <button class="btn btn-primary" onclick="configure()">Connect &amp; Start →</button>
+        <button class="btn btn-primary" id="configure-btn" onclick="configure()">Connect &amp; Start →</button>
       </div>
     </div>
 
@@ -569,11 +569,16 @@ function configure() {
     body.app_token = document.getElementById('app-token').value.trim();
     if (!body.app_token) return alert('App token required for Slack');
   }
+  const btn = document.getElementById('configure-btn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span>Validating…';
   fetch('/api/configure', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   }).then(r => r.json()).then(d => {
+    btn.disabled = false;
+    btn.textContent = 'Save & Start →';
     if (d.ok) {
       const agentNames = { claudecode: 'Claude', gemini: 'Gemini', codex: 'OpenAI Codex' };
       document.getElementById('done-msg').textContent =
@@ -590,6 +595,10 @@ function configure() {
     } else {
       alert('Error: ' + (d.error || 'unknown'));
     }
+  }).catch(() => {
+    btn.disabled = false;
+    btn.textContent = 'Connect & Start →';
+    alert('Network error — please try again');
   });
 }
 
@@ -626,6 +635,37 @@ function configure() {
 </html>`;
 
 let authProc = null;
+
+// ── Token validation ───────────────────────────────────────────────────────────
+function httpsGet(url, headers = {}) {
+    return new Promise((resolve, reject) => {
+        const https = require('https');
+        const opts = Object.assign(require('url').parse(url), { headers });
+        https.get(opts, r => {
+            let data = '';
+            r.on('data', c => data += c);
+            r.on('end', () => { try { resolve({ status: r.statusCode, body: JSON.parse(data) }); } catch { resolve({ status: r.statusCode, body: data }); } });
+        }).on('error', reject);
+    });
+}
+
+async function validatePlatformToken(platform, token, app_token) {
+    if (platform === 'telegram') {
+        const r = await httpsGet(`https://api.telegram.org/bot${token}/getMe`);
+        if (!r.body.ok) throw new Error(`Invalid Telegram token: ${r.body.description || 'unauthorized'}`);
+    } else if (platform === 'discord') {
+        const r = await httpsGet('https://discord.com/api/v10/users/@me', { Authorization: `Bot ${token}` });
+        if (r.status === 401) throw new Error('Invalid Discord token: authentication failed');
+        if (r.status !== 200) throw new Error(`Discord token check failed (HTTP ${r.status})`);
+    } else if (platform === 'slack') {
+        const r = await httpsGet('https://slack.com/api/auth.test', { Authorization: `Bearer ${token}` });
+        if (!r.body.ok) throw new Error(`Invalid Slack bot token: ${r.body.error || 'unknown'}`);
+        if (app_token) {
+            const r2 = await httpsGet('https://slack.com/api/auth.test', { Authorization: `Bearer ${app_token}` });
+            if (!r2.body.ok) throw new Error(`Invalid Slack app token: ${r2.body.error || 'unknown'}`);
+        }
+    }
+}
 
 // ── HTTP server ────────────────────────────────────────────────────────────────
 function parseBody(req) {
@@ -735,6 +775,9 @@ ${code ? '<script>setTimeout(()=>window.close(),2500)</script>' : ''}
             const body = await parseBody(req);
             const { agent, platform, token, app_token, api_key } = body;
             if (!platform || !token) throw new Error('Missing platform or token');
+
+            // Validate token against platform API before saving anything
+            await validatePlatformToken(platform, token, app_token);
 
             const validAgents = ['claudecode', 'gemini', 'codex'];
             const resolvedAgent = validAgents.includes(agent) ? agent : 'claudecode';
