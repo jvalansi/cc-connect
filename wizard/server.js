@@ -185,7 +185,7 @@ textarea:focus{border-color:#667eea}
 @keyframes spin{to{transform:rotate(360deg)}}
 /* auth flow demo */
 .auth-demo{position:relative;width:100%;height:110px;margin-bottom:1rem;overflow:hidden;border-radius:8px;background:#0a0d14;border:1px solid #2d3748}
-.auth-demo-frame{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:.4rem;opacity:0;transition:opacity .4s;padding:.75rem;text-align:center}
+.auth-demo-frame{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:.4rem;opacity:0;transition:opacity .7s;padding:.75rem;text-align:center}
 .auth-demo-frame.active{opacity:1}
 .auth-demo-step{font-size:.65rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#667eea;margin-bottom:.1rem}
 .auth-demo-label{font-size:.8rem;color:#e2e8f0;line-height:1.4}
@@ -579,7 +579,7 @@ function configure() {
 // ── auth demo animation ────────────────────────────────────────────────────────
 (function() {
   const FRAMES = 4;
-  const HOLD = 2400;
+  const HOLD = 4000;
   const CYCLE = FRAMES * HOLD;
   let demoFrame = 0;
   let demoStart = null;
