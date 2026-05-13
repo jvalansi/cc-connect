@@ -183,6 +183,22 @@ textarea:focus{border-color:#667eea}
 .alert-success{background:#1c4532;border:1px solid #276749;color:#9ae6b4;padding:.75rem 1rem;border-radius:8px;margin-bottom:1rem;font-size:.875rem}
 .spinner{display:inline-block;width:14px;height:14px;border:2px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:spin .8s linear infinite;vertical-align:middle;margin-right:.4rem}
 @keyframes spin{to{transform:rotate(360deg)}}
+/* auth flow demo */
+.auth-demo{position:relative;width:100%;height:110px;margin-bottom:1rem;overflow:hidden;border-radius:8px;background:#0a0d14;border:1px solid #2d3748}
+.auth-demo-frame{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:.4rem;opacity:0;transition:opacity .4s;padding:.75rem;text-align:center}
+.auth-demo-frame.active{opacity:1}
+.auth-demo-step{font-size:.65rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#667eea;margin-bottom:.1rem}
+.auth-demo-label{font-size:.8rem;color:#e2e8f0;line-height:1.4}
+.auth-demo-label em{color:#a0aec0;font-style:normal}
+.demo-btn{display:inline-block;background:linear-gradient(135deg,#667eea,#764ba2);color:#fff;font-size:.7rem;font-weight:700;padding:.3rem .7rem;border-radius:5px;margin-top:.2rem}
+.demo-code{font-family:monospace;font-size:1.05rem;letter-spacing:.18em;color:#68d391;background:#111827;border:1px solid #2d3748;padding:.25rem .65rem;border-radius:5px;margin-top:.2rem}
+.demo-popup{background:#1a1f2e;border:1px solid #4a5568;border-radius:6px;padding:.5rem .9rem;font-size:.75rem;color:#e2e8f0;box-shadow:0 4px 16px rgba(0,0,0,.5);margin-top:.15rem}
+.demo-tab-bar{display:flex;gap:.35rem;align-items:center;font-size:.65rem;color:#4a5568}
+.demo-tab{background:#1a1f2e;border:1px solid #2d3748;border-radius:4px 4px 0 0;padding:.2rem .5rem;color:#a0aec0;font-size:.65rem}
+.demo-tab.active-tab{color:#e2e8f0;border-bottom-color:#1a1f2e}
+.demo-tab .close{color:#718096;margin-left:.3rem;cursor:pointer}
+.demo-progress{position:absolute;bottom:0;left:0;height:2px;background:#667eea;transition:width .1s linear}
+@keyframes cursor-blink{0%,100%{opacity:1}50%{opacity:0}}
 .agent-grid,.platform-grid{display:grid;gap:.75rem;margin-bottom:1.25rem}
 .agent-grid{grid-template-columns:repeat(3,1fr)}
 .platform-grid{grid-template-columns:repeat(3,1fr)}
@@ -251,6 +267,38 @@ a{color:#63b3ed}
       <div id="auth-claude" style="display:none">
         <h2>Log in to Claude</h2>
         <p>Click <strong style="color:#e2e8f0">Start Login</strong>. A link will appear — open it in a new tab, sign in to Claude, and you'll see a <strong style="color:#e2e8f0">short verification code</strong>. Come back to <strong style="color:#e2e8f0">this tab</strong> and paste that code below.</p>
+        <!-- auth flow demo -->
+        <div class="auth-demo" id="auth-demo">
+          <div class="auth-demo-frame active" id="demo-f0">
+            <div class="auth-demo-step">Step 1</div>
+            <div class="auth-demo-label">Click <span class="demo-btn">Start Login</span></div>
+            <div class="auth-demo-label" style="color:#4a5568;font-size:.72rem;margin-top:.2rem">A sign-in link appears below</div>
+          </div>
+          <div class="auth-demo-frame" id="demo-f1">
+            <div class="auth-demo-step">Step 2</div>
+            <div class="auth-demo-label">A new tab opens — sign in to Claude</div>
+            <div class="demo-tab-bar" style="margin-top:.2rem">
+              <div class="demo-tab">cc-connect Setup</div>
+              <div class="demo-tab active-tab">claude.ai <span class="close">✕</span></div>
+            </div>
+            <div class="demo-popup">claude.ai — authorising cc-connect…</div>
+          </div>
+          <div class="auth-demo-frame" id="demo-f2">
+            <div class="auth-demo-step">Step 3</div>
+            <div class="auth-demo-label">Claude shows a code — <em>copy it</em></div>
+            <div class="demo-code" id="demo-code-el">A7F3-K9PQ</div>
+            <div class="auth-demo-label" style="color:#4a5568;font-size:.72rem">then close that tab</div>
+          </div>
+          <div class="auth-demo-frame" id="demo-f3">
+            <div class="auth-demo-step">Step 4</div>
+            <div class="auth-demo-label">Back here — paste the code &amp; submit</div>
+            <div style="display:flex;gap:.35rem;margin-top:.25rem;align-items:center">
+              <div style="background:#0f1117;border:1px solid #2d3748;border-radius:5px;padding:.25rem .6rem;font-family:monospace;font-size:.85rem;color:#68d391;letter-spacing:.12em">A7F3-K9PQ</div>
+              <div class="demo-btn">Submit</div>
+            </div>
+          </div>
+          <div class="demo-progress" id="demo-progress"></div>
+        </div>
         <div class="terminal" id="auth-out">Ready. Press Start Login to begin.</div>
         <div class="url-box" id="auth-url-box" style="display:none">
           <strong>Step 1 — Open this link and sign in:</strong><br>
@@ -527,6 +575,35 @@ function configure() {
     }
   });
 }
+
+// ── auth demo animation ────────────────────────────────────────────────────────
+(function() {
+  const FRAMES = 4;
+  const HOLD = 2400;
+  const CYCLE = FRAMES * HOLD;
+  let demoFrame = 0;
+  let demoStart = null;
+
+  function tick(ts) {
+    if (!demoStart) demoStart = ts;
+    const elapsed = (ts - demoStart) % CYCLE;
+    const target = Math.floor(elapsed / HOLD);
+    if (target !== demoFrame) {
+      const prev = document.getElementById('demo-f' + demoFrame);
+      if (prev) prev.classList.remove('active');
+      demoFrame = target;
+      const next = document.getElementById('demo-f' + demoFrame);
+      if (next) next.classList.add('active');
+    }
+    const bar = document.getElementById('demo-progress');
+    if (bar) bar.style.width = ((elapsed % HOLD) / HOLD * 100) + '%';
+    requestAnimationFrame(tick);
+  }
+
+  document.addEventListener('DOMContentLoaded', function() {
+    if (document.getElementById('auth-demo')) requestAnimationFrame(tick);
+  });
+})();
 </script>
 </body>
 </html>`;
