@@ -354,7 +354,7 @@ a{color:#63b3ed}
       </div>
       <div id="token-form" style="display:none">
         <div id="hint-telegram" style="display:none"><p>Message <a href="https://t.me/BotFather" target="_blank"><strong>@BotFather</strong></a> on Telegram → <code>/newbot</code> → copy the token.</p></div>
-        <div id="hint-discord"  style="display:none"><p>Go to <a href="https://discord.com/developers/applications" target="_blank"><strong>discord.com/developers/applications</strong></a> → New App → Bot → copy Token. Enable <em>Message Content Intent</em>.</p></div>
+        <div id="hint-discord"  style="display:none"><p>Go to <a href="https://discord.com/developers/applications" target="_blank"><strong>discord.com/developers/applications</strong></a> → New App → Bot → copy Token. Enable <em>Message Content Intent</em>.<br>Then: OAuth2 → URL Generator → scope <code>bot</code> → permission <code>Send Messages</code> → open the generated URL to invite the bot to your server.</p></div>
         <div id="hint-slack"    style="display:none"><p>Go to <a href="https://api.slack.com/apps" target="_blank"><strong>api.slack.com/apps</strong></a> → create app → enable Socket Mode → install to workspace.</p></div>
         <label id="token-label">Bot Token</label>
         <input type="password" id="token" placeholder="Paste token here…" autocomplete="off">
