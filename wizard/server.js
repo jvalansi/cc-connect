@@ -353,9 +353,31 @@ a{color:#63b3ed}
         <div class="tile" id="plat-slack"    onclick="pickPlat('slack')"><span class="icon">💼</span>Slack</div>
       </div>
       <div id="token-form" style="display:none">
-        <div id="hint-telegram" style="display:none"><p>Message <a href="https://t.me/BotFather" target="_blank"><strong>@BotFather</strong></a> on Telegram → <code>/newbot</code> → copy the token.</p></div>
-        <div id="hint-discord"  style="display:none"><p>Go to <a href="https://discord.com/developers/applications" target="_blank"><strong>discord.com/developers/applications</strong></a> → New App → Bot → copy Token. Enable <em>Message Content Intent</em>.<br>Then: OAuth2 → URL Generator → scope <code>bot</code> → permission <code>Send Messages</code> → open the generated URL to invite the bot to your server.</p></div>
-        <div id="hint-slack"    style="display:none"><p>Go to <a href="https://api.slack.com/apps" target="_blank"><strong>api.slack.com/apps</strong></a> → create app → enable Socket Mode → install to workspace.</p></div>
+        <div id="hint-telegram" style="display:none">
+          <ol>
+            <li>Open Telegram and message <a href="https://t.me/BotFather" target="_blank"><strong>@BotFather</strong></a></li>
+            <li>Send <code>/newbot</code> and follow the prompts to name your bot</li>
+            <li>Copy the token BotFather gives you and paste it below</li>
+          </ol>
+        </div>
+        <div id="hint-discord"  style="display:none">
+          <ol>
+            <li>Open <a href="https://discord.com/developers/applications" target="_blank">discord.com/developers/applications</a> → <strong>New Application</strong></li>
+            <li>Go to <strong>Bot</strong> → <strong>Reset Token</strong> → copy the token and paste it below</li>
+            <li>On the same Bot page, enable <strong>Message Content Intent</strong></li>
+            <li>Go to <strong>OAuth2 → URL Generator</strong> → tick scope <code>bot</code> → tick permission <code>Send Messages</code></li>
+            <li>Copy the generated URL, open it in a new tab, and invite the bot to your server</li>
+          </ol>
+        </div>
+        <div id="hint-slack"    style="display:none">
+          <ol>
+            <li>Open <a href="https://api.slack.com/apps" target="_blank">api.slack.com/apps</a> → <strong>Create New App</strong> → From scratch</li>
+            <li>Go to <strong>Socket Mode</strong> → enable it → create an App-Level Token with scope <code>connections:write</code> → copy that token</li>
+            <li>Go to <strong>OAuth &amp; Permissions</strong> → add bot scopes: <code>app_mentions:read</code>, <code>chat:write</code>, <code>im:history</code>, <code>channels:history</code></li>
+            <li>Click <strong>Install to Workspace</strong> → copy the <em>Bot User OAuth Token</em></li>
+            <li>Go to <strong>Event Subscriptions</strong> → enable → subscribe to <code>app_mention</code> and <code>message.im</code></li>
+          </ol>
+        </div>
         <label id="token-label">Bot Token</label>
         <input type="password" id="token" placeholder="Paste token here…" autocomplete="off">
         <div class="slack-extra" id="slack-extra">
