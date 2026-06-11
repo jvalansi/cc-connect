@@ -48,6 +48,8 @@ type Platform struct {
 	token                      string
 	allowFrom                  string
 	guildID                    string // optional: per-guild registration (instant) vs global (up to 1h propagation)
+	allowedChannels            map[string]struct{}
+	deniedChannels             map[string]struct{}
 	progressStyle              string
 	groupReplyAll              bool
 	shareSessionInChannel      bool
@@ -74,6 +76,24 @@ func New(opts map[string]any) (core.Platform, error) {
 	allowFrom, _ := opts["allow_from"].(string)
 	core.CheckAllowFrom("discord", allowFrom)
 	guildID, _ := opts["guild_id"].(string)
+	var allowedChannels map[string]struct{}
+	if v, _ := opts["allowed_channels"].(string); v != "" {
+		allowedChannels = make(map[string]struct{})
+		for _, id := range strings.Split(v, ",") {
+			if id = strings.TrimSpace(id); id != "" {
+				allowedChannels[id] = struct{}{}
+			}
+		}
+	}
+	var deniedChannels map[string]struct{}
+	if v, _ := opts["denied_channels"].(string); v != "" {
+		deniedChannels = make(map[string]struct{})
+		for _, id := range strings.Split(v, ",") {
+			if id = strings.TrimSpace(id); id != "" {
+				deniedChannels[id] = struct{}{}
+			}
+		}
+	}
 	groupReplyAll, _ := opts["group_reply_all"].(bool)
 	shareSessionInChannel, _ := opts["share_session_in_channel"].(bool)
 	threadIsolation, _ := opts["thread_isolation"].(bool)
@@ -107,6 +127,8 @@ func New(opts map[string]any) (core.Platform, error) {
 		token:                      token,
 		allowFrom:                  allowFrom,
 		guildID:                    guildID,
+		allowedChannels:            allowedChannels,
+		deniedChannels:             deniedChannels,
 		progressStyle:              progressStyle,
 		groupReplyAll:              groupReplyAll,
 		shareSessionInChannel:      shareSessionInChannel,
@@ -551,6 +573,18 @@ func (p *Platform) Start(handler core.MessageHandler) error {
 		if !core.AllowList(p.allowFrom, m.Author.ID) {
 			slog.Debug("discord: message from unauthorized user", "user", m.Author.ID)
 			return
+		}
+		if len(p.allowedChannels) > 0 {
+			if _, ok := p.allowedChannels[m.ChannelID]; !ok {
+				slog.Debug("discord: message from non-allowed channel", "channel", m.ChannelID)
+				return
+			}
+		}
+		if len(p.deniedChannels) > 0 {
+			if _, ok := p.deniedChannels[m.ChannelID]; ok {
+				slog.Debug("discord: message from denied channel", "channel", m.ChannelID)
+				return
+			}
 		}
 
 		// In guild channels, only respond when the bot is @mentioned (unless group_reply_all).
