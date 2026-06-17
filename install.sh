@@ -38,6 +38,28 @@ if command -v cloud-init &>/dev/null; then
     cloud-init status --wait >/dev/null 2>&1 || true
 fi
 
+# ── Swap ──────────────────────────────────────────────────────────────────────
+# Small droplets (≤2 GiB) with no swap OOM-kill cc-connect under load.
+# Provision 2 GiB of swap if the host has none.
+section "Ensuring swap is configured"
+
+if [[ "$(swapon --show --noheadings | wc -l)" -eq 0 ]]; then
+    SWAPFILE=/swapfile
+    if [[ ! -f "$SWAPFILE" ]]; then
+        info "Allocating 2 GiB swapfile at ${SWAPFILE}…"
+        fallocate -l 2G "$SWAPFILE" || dd if=/dev/zero of="$SWAPFILE" bs=1M count=2048 status=none
+        chmod 600 "$SWAPFILE"
+        mkswap "$SWAPFILE" >/dev/null
+    fi
+    swapon "$SWAPFILE" || warn "swapon failed; continuing without swap"
+    if ! grep -q "^${SWAPFILE} " /etc/fstab; then
+        echo "${SWAPFILE} none swap sw 0 0" >> /etc/fstab
+    fi
+    info "Swap enabled: $(swapon --show --noheadings | head -1)"
+else
+    info "Swap already configured: $(swapon --show --noheadings | head -1)"
+fi
+
 # ── Node.js ───────────────────────────────────────────────────────────────────
 section "Checking Node.js"
 
@@ -108,7 +130,7 @@ Type=simple
 User=${SERVICE_USER}
 WorkingDirectory=${CONFIG_DIR}
 ExecStart=${CC_BIN}
-Restart=on-failure
+Restart=always
 RestartSec=10s
 Environment="PATH=${NODE_BIN_DIR}:${SERVICE_HOME}/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin"
 EnvironmentFile=-${CONFIG_DIR}/agent.env
