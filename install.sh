@@ -184,6 +184,8 @@ Type=simple
 User=root
 WorkingDirectory=${CONFIG_DIR}
 ExecStart=${NODE_BIN_DIR}/node ${WIZARD_SCRIPT}
+Restart=always
+RestartSec=10s
 Environment="PATH=${NODE_BIN_DIR}:${SERVICE_HOME}/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin"
 
 [Install]
