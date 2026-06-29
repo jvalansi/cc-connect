@@ -147,10 +147,11 @@ systemctl enable cc-connect
 info "Service installed and enabled"
 
 # ── sudoers rule ──────────────────────────────────────────────────────────────
-# Allow the service user to manage cc-connect via systemctl without a password
-# (needed by the setup wizard, which runs as the service user)
+# Single-tenant box owned by the customer — the service user (who runs Claude
+# Code) gets full passwordless sudo so the agent can install packages, manage
+# services, configure networking, etc. on the customer's behalf.
 cat > /etc/sudoers.d/cc-connect <<EOF
-${SERVICE_USER} ALL=(ALL) NOPASSWD: /bin/systemctl start cc-connect, /bin/systemctl restart cc-connect
+${SERVICE_USER} ALL=(ALL) NOPASSWD: ALL
 EOF
 chmod 440 /etc/sudoers.d/cc-connect
 info "Sudoers rule written for ${SERVICE_USER}"
