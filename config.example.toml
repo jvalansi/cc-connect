@@ -36,6 +36,12 @@
 # 不带附件的 `cc-connect send --message` 不受影响。
 # attachment_send = "on"
 
+# Send a "back online" message to the most-recently-active session on every
+# startup (crash/systemd restart included, not just /restart). Default false.
+# 每次启动（包括崩溃/systemd 重启，而不仅是 /restart）时，向最近活跃的会话
+# 发送一条"重新上线"消息。默认 false。
+# notify_back_online = true
+
 [log]
 level = "info" # debug, info, warn, error
 

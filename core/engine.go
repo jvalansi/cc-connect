@@ -102,36 +102,108 @@ func ConsumeRestartNotify(dataDir string) *RestartRequest {
 	return &req
 }
 
-// SendRestartNotification sends a "restart successful" message to the
-// platform/session that initiated the restart.
-func (e *Engine) SendRestartNotification(platformName, sessionKey string) {
+// SaveLastActive persists the most-recently-active session so the next
+// startup can send a "back online" message to it. Unlike restart_notify,
+// this is written continuously (on each message) so it survives crashes.
+func SaveLastActive(dataDir string, req RestartRequest) error {
+	dir := filepath.Join(dataDir, "run")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		slog.Warn("SaveLastActive: mkdir failed", "dir", dir, "error", err)
+	}
+	data, _ := json.Marshal(req)
+	return AtomicWriteFile(filepath.Join(dir, "last_active"), data, 0o644)
+}
+
+// ConsumeLastActive reads and deletes the last-active session file.
+// Returns nil if none is recorded.
+func ConsumeLastActive(dataDir string) *RestartRequest {
+	p := filepath.Join(dataDir, "run", "last_active")
+	data, err := os.ReadFile(p)
+	if err != nil {
+		return nil
+	}
+	os.Remove(p)
+	var req RestartRequest
+	if json.Unmarshal(data, &req) != nil {
+		return nil
+	}
+	if req.SessionKey == "" || req.Platform == "" {
+		return nil
+	}
+	return &req
+}
+
+// EnableBackOnlineNotify turns on continuous last-active tracking. When
+// enabled, handleMessage records the session to dataDir/run/last_active so
+// the next startup can greet it via SendBackOnlineNotification.
+func (e *Engine) EnableBackOnlineNotify(dataDir string) {
+	e.lastActiveMu.Lock()
+	defer e.lastActiveMu.Unlock()
+	e.backOnlineDataDir = dataDir
+	e.backOnlineEnabled = true
+}
+
+// recordLastActive persists the session key as the most-recently-active one,
+// skipping the write when it is unchanged to avoid churn on rapid messages.
+func (e *Engine) recordLastActive(platform, sessionKey string) {
+	if platform == "" || sessionKey == "" {
+		return
+	}
+	e.lastActiveMu.Lock()
+	if !e.backOnlineEnabled || (sessionKey == e.lastActiveKey) {
+		e.lastActiveMu.Unlock()
+		return
+	}
+	e.lastActiveKey = sessionKey
+	dataDir := e.backOnlineDataDir
+	e.lastActiveMu.Unlock()
+	if err := SaveLastActive(dataDir, RestartRequest{SessionKey: sessionKey, Platform: platform}); err != nil {
+		slog.Warn("recordLastActive: save failed", "error", err)
+	}
+}
+
+// SendBackOnlineNotification sends a "back online" message to the given
+// platform/session. No-op if this engine does not own the platform.
+func (e *Engine) SendBackOnlineNotification(platformName, sessionKey string) {
+	e.sendSessionNotice(platformName, sessionKey, e.i18n.T(MsgBackOnline))
+}
+
+// sendSessionNotice reconstructs a reply context from a session key and sends
+// a one-off text notice to it. Shared by restart and back-online notifications.
+func (e *Engine) sendSessionNotice(platformName, sessionKey, text string) {
 	for _, p := range e.platforms {
 		if p.Name() != platformName {
 			continue
 		}
 		rc, ok := p.(ReplyContextReconstructor)
 		if !ok {
-			slog.Debug("restart notify: platform does not support ReconstructReplyCtx", "platform", platformName)
+			slog.Debug("session notice: platform does not support ReconstructReplyCtx", "platform", platformName)
 			return
 		}
 		rctx, err := rc.ReconstructReplyCtx(sessionKey)
 		if err != nil {
-			slog.Debug("restart notify: reconstruct failed", "error", err)
+			slog.Debug("session notice: reconstruct failed", "error", err)
 			return
 		}
-		text := e.i18n.T(MsgRestartSuccess)
-		if CurrentVersion != "" {
-			text += fmt.Sprintf(" (%s)", CurrentVersion)
-		}
 		if err := e.waitOutgoing(p); err != nil {
-			slog.Debug("restart notify: outgoing wait cancelled or limited", "platform", platformName, "error", err)
+			slog.Debug("session notice: outgoing wait cancelled or limited", "platform", platformName, "error", err)
 			return
 		}
 		if err := p.Send(e.ctx, rctx, text); err != nil {
-			slog.Debug("restart notify: send failed", "error", err)
+			slog.Debug("session notice: send failed", "error", err)
 		}
 		return
 	}
+}
+
+// SendRestartNotification sends a "restart successful" message to the
+// platform/session that initiated the restart.
+func (e *Engine) SendRestartNotification(platformName, sessionKey string) {
+	text := e.i18n.T(MsgRestartSuccess)
+	if CurrentVersion != "" {
+		text += fmt.Sprintf(" (%s)", CurrentVersion)
+	}
+	e.sendSessionNotice(platformName, sessionKey, text)
 }
 
 // RestartCh is signaled when /restart is invoked. main listens on it
@@ -170,6 +242,14 @@ type Engine struct {
 	injectSender          bool
 	attachmentSendEnabled bool
 	startedAt             time.Time
+
+	// Back-online notification: when enabled, the most-recently-active
+	// session is persisted to dataDir/run/last_active on each message so
+	// the next startup can greet it. lastActiveKey dedupes writes.
+	backOnlineEnabled bool
+	backOnlineDataDir string
+	lastActiveKey     string
+	lastActiveMu      sync.Mutex
 
 	providerSaveFunc        func(providerName string) error
 	providerAddSaveFunc     func(p ProviderConfig) error
@@ -1863,6 +1943,8 @@ func (e *Engine) handleMessage(p Platform, msg *Message) {
 		UserName:   msg.UserName,
 		Content:    msg.Content,
 	})
+
+	e.recordLastActive(msg.Platform, msg.SessionKey)
 
 	// Voice message: transcribe to text first
 	if msg.Audio != nil {

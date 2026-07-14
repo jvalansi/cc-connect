@@ -116,6 +116,10 @@ type Config struct {
 	// setting so the reaper policy is consistent across projects; per-project
 	// configuration is intentionally not supported.
 	WorkspaceIdleTimeoutMins *int `toml:"workspace_idle_timeout_mins,omitempty"`
+	// NotifyBackOnline, when true, sends a "back online" message to the
+	// most-recently-active session on every startup (including crash/systemd
+	// restarts, not just /restart). Default false.
+	NotifyBackOnline *bool `toml:"notify_back_online,omitempty"`
 }
 
 // CronConfig controls cron job behavior.

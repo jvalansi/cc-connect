@@ -285,6 +285,9 @@ func main() {
 		}
 		engine.SetReplyFooterEnabled(showFooter)
 		engine.SetAttachmentSendEnabled(cfg.AttachmentSend != "off")
+		if cfg.NotifyBackOnline != nil && *cfg.NotifyBackOnline {
+			engine.EnableBackOnlineNotify(cfg.DataDir)
+		}
 		engine.SetFilterExternalSessions(proj.FilterExternalSessions != nil && *proj.FilterExternalSessions)
 		engine.SetBaseWorkDir(workDir)
 		engine.SetProjectStateStore(projectState)
@@ -1056,11 +1059,20 @@ func main() {
 
 	slog.Info("cc-connect is running", "projects", len(engines))
 
-	// After startup, check if we were restarted and send success notification
+	// After startup, check if we were restarted and send success notification.
+	// A /restart notification takes precedence over the generic back-online
+	// greeting so the user only gets one message.
 	if notify := core.ConsumeRestartNotify(cfg.DataDir); notify != nil {
 		slog.Info("post-restart: sending success notification", "platform", notify.Platform, "session", notify.SessionKey)
 		for _, e := range engines {
 			e.SendRestartNotification(notify.Platform, notify.SessionKey)
+		}
+	} else if cfg.NotifyBackOnline != nil && *cfg.NotifyBackOnline {
+		if last := core.ConsumeLastActive(cfg.DataDir); last != nil {
+			slog.Info("startup: sending back-online notification", "platform", last.Platform, "session", last.SessionKey)
+			for _, e := range engines {
+				e.SendBackOnlineNotification(last.Platform, last.SessionKey)
+			}
 		}
 	}
 

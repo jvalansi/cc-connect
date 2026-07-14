@@ -388,6 +388,7 @@ const (
 
 	MsgRestarting     MsgKey = "restarting"
 	MsgRestartSuccess MsgKey = "restart_success"
+	MsgBackOnline     MsgKey = "back_online"
 
 	MsgUpgradeChecking    MsgKey = "upgrade_checking"
 	MsgUpgradeUpToDate    MsgKey = "upgrade_up_to_date"
@@ -2702,6 +2703,13 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "✅ cc-connect 重啟成功。",
 		LangJapanese:           "✅ cc-connect の再起動が完了しました。",
 		LangSpanish:            "✅ cc-connect se reinició correctamente.",
+	},
+	MsgBackOnline: {
+		LangEnglish:            "👋 I'm back online.",
+		LangChinese:            "👋 我已重新上线。",
+		LangTraditionalChinese: "👋 我已重新上線。",
+		LangJapanese:           "👋 オンラインに復帰しました。",
+		LangSpanish:            "👋 Estoy de vuelta en línea.",
 	},
 	MsgUpgradeChecking: {
 		LangEnglish:            "🔍 Checking for updates...",
