@@ -1286,3 +1286,35 @@ func findProjectDir(homeDir, absWorkDir string) string {
 
 	return ""
 }
+
+// resumeTranscriptMissing reports whether a concrete saved session ID is known
+// to have no on-disk transcript for workDir — i.e. a `claude --resume <id>`
+// would fail with "No conversation found", leaving the thread stuck emitting
+// empty responses forever (the CLI reports the failure only after the process
+// starts, so the engine's StartSession fallback never fires).
+//
+// It returns true ONLY when the project directory is located but the
+// <sessionID>.jsonl file is absent. When the project dir can't be resolved
+// (unknown encoding, missing dir), it returns false so a genuinely valid
+// resume is never wrongly skipped.
+func resumeTranscriptMissing(workDir, sessionID string) bool {
+	if sessionID == "" || sessionID == core.ContinueSession {
+		return false
+	}
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return false
+	}
+	absWorkDir, err := filepath.Abs(workDir)
+	if err != nil {
+		return false
+	}
+	projectDir := findProjectDir(homeDir, absWorkDir)
+	if projectDir == "" {
+		return false
+	}
+	if _, err := os.Stat(filepath.Join(projectDir, sessionID+".jsonl")); os.IsNotExist(err) {
+		return true
+	}
+	return false
+}

@@ -74,8 +74,19 @@ func newClaudeSession(ctx context.Context, workDir, cliBin string, cliExtraArgs 
 		// Truly fresh session — no resume, no continue.
 	default:
 		// Resuming a known session ID — this is cc-connect's own session
-		// from a previous connection, safe to resume directly.
-		innerArgs = append(innerArgs, "--resume", sessionID)
+		// from a previous connection. But if its transcript was deleted
+		// (e.g. Claude Code's cleanupPeriodDays GC), --resume fails with
+		// "No conversation found" *after* the process starts, so the engine
+		// never sees an error and the thread emits empty responses forever.
+		// Detect that case up front and start fresh instead; the real session
+		// ID is captured from the CLI's init event just like any new session.
+		if resumeTranscriptMissing(workDir, sessionID) {
+			slog.Warn("claudeSession: resume transcript missing, starting fresh session",
+				"requested_session", sessionID, "work_dir", workDir)
+			sessionID = ""
+		} else {
+			innerArgs = append(innerArgs, "--resume", sessionID)
+		}
 	}
 	if len(allowedTools) > 0 {
 		innerArgs = append(innerArgs, "--allowedTools", strings.Join(allowedTools, ","))

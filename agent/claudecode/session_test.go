@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -281,5 +282,53 @@ func TestHelperProcess(t *testing.T) {
 		os.Exit(0)
 	default:
 		os.Exit(2)
+	}
+}
+
+// TestResumeTranscriptMissing verifies that a saved session ID whose transcript
+// file was deleted is detected so the session starts fresh instead of resuming a
+// dead ID (which would leave the thread emitting empty responses forever).
+func TestResumeTranscriptMissing(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home) // Windows
+
+	workDir := filepath.Join(home, "work", "myproj")
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	absWorkDir, _ := filepath.Abs(workDir)
+	projectDir := filepath.Join(home, ".claude", "projects", encodeClaudeProjectKey(absWorkDir))
+	if err := os.MkdirAll(projectDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	live := "11111111-1111-1111-1111-111111111111"
+	if err := os.WriteFile(filepath.Join(projectDir, live+".jsonl"), []byte("{}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cases := []struct {
+		name      string
+		sessionID string
+		want      bool
+	}{
+		{"live transcript exists", live, false},
+		{"transcript deleted", "22222222-2222-2222-2222-222222222222", true},
+		{"empty is fresh", "", false},
+		{"continue is not a resume", core.ContinueSession, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := resumeTranscriptMissing(workDir, tc.sessionID); got != tc.want {
+				t.Errorf("resumeTranscriptMissing(%q) = %v, want %v", tc.sessionID, got, tc.want)
+			}
+		})
+	}
+
+	// Unknown project dir (never created) must NOT be treated as missing —
+	// we don't second-guess a resume we can't verify.
+	if resumeTranscriptMissing(filepath.Join(home, "no", "such", "dir"), live) {
+		t.Error("unresolvable project dir should return false, not skip a valid resume")
 	}
 }
