@@ -282,6 +282,9 @@ type Engine struct {
 	bannedWords []string
 	bannedMu    sync.RWMutex
 
+	// reauth tracks an in-flight /auth flow (see reauth.go).
+	reauth reauthState
+
 	disabledCmds map[string]bool
 	adminFrom    string           // comma-separated user IDs for privileged commands; "*" = all allowed users; "" = deny
 	userRoles    *UserRoleManager // nil = legacy mode (no per-user policies)
@@ -897,6 +900,7 @@ func (e *Engine) SetAdminFrom(adminFrom string) {
 
 // privilegedCommands are commands that require admin_from authorization.
 var privilegedCommands = map[string]bool{
+	"auth":    true,
 	"shell":   true,
 	"show":    true,
 	"dir":     true,
@@ -2104,6 +2108,11 @@ func (e *Engine) handleMessage(p Platform, msg *Message) {
 
 	// Pending provider add (card-driven multi-step flow)
 	if e.handlePendingProviderAdd(p, msg, content) {
+		return
+	}
+
+	// Authorization code pasted in reply to /auth
+	if len(msg.Images) == 0 && e.handlePendingReauthCode(p, msg, content) {
 		return
 	}
 
@@ -3388,7 +3397,15 @@ func (e *Engine) runUnsolicitedReader(ctx context.Context, cancel context.Cancel
 			case EventError:
 				if event.Error != nil {
 					slog.Error("unsolicited agent error", "error", event.Error, "session", sessionKey)
-					e.send(p, replyCtx, fmt.Sprintf(e.i18n.T(MsgError), event.Error))
+					errMsg := event.Error.Error()
+					state.mu.Lock()
+					stateAgent := state.agent
+					state.mu.Unlock()
+					userMsg := fmt.Sprintf(e.i18n.T(MsgError), errMsg)
+					if hint, ok := e.authErrorHint(stateAgent, errMsg); ok {
+						userMsg = hint
+					}
+					e.send(p, replyCtx, userMsg)
 				}
 				state.mu.Lock()
 				state.eventsNeedResync = true
@@ -4318,10 +4335,19 @@ func (e *Engine) processInteractiveEvents(state *interactiveState, session *Sess
 					Error:      event.Error.Error(),
 				})
 				userMsg := fmt.Sprintf(e.i18n.T(MsgError), errMsg)
-				for _, h := range agentErrorHandlers {
-					if strings.Contains(errMsg, h.contains) {
-						userMsg = e.i18n.T(h.msgKey)
-						break
+				state.mu.Lock()
+				stateAgent := state.agent
+				state.mu.Unlock()
+				if hint, ok := e.authErrorHint(stateAgent, errMsg); ok {
+					// Expired credentials are user-fixable — point at /auth
+					// instead of relaying a raw provider error.
+					userMsg = hint
+				} else {
+					for _, h := range agentErrorHandlers {
+						if strings.Contains(errMsg, h.contains) {
+							userMsg = e.i18n.T(h.msgKey)
+							break
+						}
 					}
 				}
 				e.send(p, replyCtx, userMsg)
@@ -4555,6 +4581,7 @@ var builtinCommands = []struct {
 	{[]string{"web"}, "web"},
 	{[]string{"diff"}, "diff"},
 	{[]string{"ps", "btw"}, "ps"},
+	{[]string{"auth", "login"}, "auth"},
 }
 
 func (e *Engine) cmdPs(p Platform, msg *Message, args []string) {
@@ -4747,6 +4774,8 @@ func (e *Engine) handleCommand(p Platform, msg *Message, raw string) bool {
 		e.cmdBind(p, msg, args)
 	case "search":
 		e.cmdSearch(p, msg, args)
+	case "auth":
+		e.cmdAuth(p, msg, args)
 	case "shell":
 		e.cmdShell(p, msg, raw)
 	case "diff":
