@@ -141,6 +141,17 @@ const (
 	MsgToolAllowedNew            MsgKey = "tool_allowed_new"
 	MsgError                     MsgKey = "error"
 	MsgSessionNotFound           MsgKey = "session_not_found"
+	MsgAuthExpired               MsgKey = "auth_expired"
+	MsgAuthStarted               MsgKey = "auth_started"
+	MsgAuthStartFailed           MsgKey = "auth_start_failed"
+	MsgAuthCodeReceived          MsgKey = "auth_code_received"
+	MsgAuthCodeFailed            MsgKey = "auth_code_failed"
+	MsgAuthSucceeded             MsgKey = "auth_succeeded"
+	MsgAuthFailed                MsgKey = "auth_failed"
+	MsgAuthCancelled             MsgKey = "auth_cancelled"
+	MsgAuthNoPending             MsgKey = "auth_no_pending"
+	MsgAuthNotInitiator          MsgKey = "auth_not_initiator"
+	MsgAuthUnsupported           MsgKey = "auth_unsupported"
 	MsgFailedToStartAgentSession MsgKey = "failed_to_start_agent_session"
 	MsgFailedToDeleteSession     MsgKey = "failed_to_delete_session"
 	MsgEmptyResponse             MsgKey = "empty_response"
@@ -736,6 +747,83 @@ var messages = map[MsgKey]map[Language]string{
 		LangJapanese:           "⚠️ セッションが期限切れです。/new で新しい会話を開始してください。",
 		LangSpanish:            "⚠️ Sesión expirada. Usa /new para iniciar una nueva conversación.",
 	},
+	MsgAuthExpired: {
+		LangEnglish:            "🔑 Sign-in has expired. Send /auth and I'll post a link — open it, then paste the code back here.",
+		LangChinese:            "🔑 登录已过期。发送 /auth，我会给你一个链接 — 打开后把验证码粘贴回这里。",
+		LangTraditionalChinese: "🔑 登入已過期。發送 /auth，我會給你一個連結 — 開啟後把驗證碼貼回這裡。",
+		LangJapanese:           "🔑 サインインの有効期限が切れました。/auth を送るとリンクを表示します — 開いてコードをここに貼り付けてください。",
+		LangSpanish:            "🔑 La sesión de inicio caducó. Envía /auth y te daré un enlace — ábrelo y pega aquí el código.",
+	},
+	MsgAuthStarted: {
+		LangEnglish:            "🔑 Open this link and approve access:\n%s\n\nYou'll be shown a code — paste it back in this thread (or send `/auth <code>`). It is single-use and expires in a few minutes.",
+		LangChinese:            "🔑 打开此链接并授权：\n%s\n\n页面会显示一个验证码 — 把它粘贴回本话题（或发送 `/auth <验证码>`）。验证码一次性有效，几分钟后过期。",
+		LangTraditionalChinese: "🔑 開啟此連結並授權：\n%s\n\n頁面會顯示一個驗證碼 — 把它貼回本話題（或發送 `/auth <驗證碼>`）。驗證碼一次性有效，幾分鐘後過期。",
+		LangJapanese:           "🔑 このリンクを開いてアクセスを承認してください：\n%s\n\nコードが表示されます — このスレッドに貼り付けてください（または `/auth <コード>` を送信）。コードは使い捨てで数分で期限切れになります。",
+		LangSpanish:            "🔑 Abre este enlace y autoriza el acceso:\n%s\n\nVerás un código — pégalo en este hilo (o envía `/auth <código>`). Es de un solo uso y caduca en unos minutos.",
+	},
+	MsgAuthStartFailed: {
+		LangEnglish:            "❌ Could not start sign-in: %v",
+		LangChinese:            "❌ 无法开始登录：%v",
+		LangTraditionalChinese: "❌ 無法開始登入：%v",
+		LangJapanese:           "❌ サインインを開始できませんでした: %v",
+		LangSpanish:            "❌ No se pudo iniciar el inicio de sesión: %v",
+	},
+	MsgAuthCodeReceived: {
+		LangEnglish:            "⏳ Code received, signing in…",
+		LangChinese:            "⏳ 已收到验证码，正在登录…",
+		LangTraditionalChinese: "⏳ 已收到驗證碼，正在登入…",
+		LangJapanese:           "⏳ コードを受け取りました。サインインしています…",
+		LangSpanish:            "⏳ Código recibido, iniciando sesión…",
+	},
+	MsgAuthCodeFailed: {
+		LangEnglish:            "❌ Could not submit the code: %v",
+		LangChinese:            "❌ 无法提交验证码：%v",
+		LangTraditionalChinese: "❌ 無法提交驗證碼：%v",
+		LangJapanese:           "❌ コードを送信できませんでした: %v",
+		LangSpanish:            "❌ No se pudo enviar el código: %v",
+	},
+	MsgAuthSucceeded: {
+		LangEnglish:            "✅ Signed in. Send your message again and I'll pick it up.",
+		LangChinese:            "✅ 已登录。请重新发送你的消息。",
+		LangTraditionalChinese: "✅ 已登入。請重新發送你的訊息。",
+		LangJapanese:           "✅ サインインしました。メッセージをもう一度送ってください。",
+		LangSpanish:            "✅ Sesión iniciada. Vuelve a enviar tu mensaje y lo retomo.",
+	},
+	MsgAuthFailed: {
+		LangEnglish:            "❌ Sign-in failed: %v\n\nSend /auth for a fresh link.",
+		LangChinese:            "❌ 登录失败：%v\n\n发送 /auth 获取新链接。",
+		LangTraditionalChinese: "❌ 登入失敗：%v\n\n發送 /auth 取得新連結。",
+		LangJapanese:           "❌ サインインに失敗しました: %v\n\n/auth を送ると新しいリンクを表示します。",
+		LangSpanish:            "❌ Falló el inicio de sesión: %v\n\nEnvía /auth para obtener un enlace nuevo.",
+	},
+	MsgAuthCancelled: {
+		LangEnglish:            "🚫 Sign-in cancelled.",
+		LangChinese:            "🚫 已取消登录。",
+		LangTraditionalChinese: "🚫 已取消登入。",
+		LangJapanese:           "🚫 サインインをキャンセルしました。",
+		LangSpanish:            "🚫 Inicio de sesión cancelado.",
+	},
+	MsgAuthNoPending: {
+		LangEnglish:            "No sign-in is waiting for a code. Send /auth to start one.",
+		LangChinese:            "当前没有等待验证码的登录。发送 /auth 开始登录。",
+		LangTraditionalChinese: "目前沒有等待驗證碼的登入。發送 /auth 開始登入。",
+		LangJapanese:           "コード待ちのサインインはありません。/auth で開始してください。",
+		LangSpanish:            "No hay ningún inicio de sesión esperando un código. Envía /auth para comenzar.",
+	},
+	MsgAuthNotInitiator: {
+		LangEnglish:            "⚠️ Only the user who ran /auth can finish signing in.",
+		LangChinese:            "⚠️ 只有发起 /auth 的用户才能完成登录。",
+		LangTraditionalChinese: "⚠️ 只有發起 /auth 的使用者才能完成登入。",
+		LangJapanese:           "⚠️ /auth を実行したユーザーのみがサインインを完了できます。",
+		LangSpanish:            "⚠️ Solo quien ejecutó /auth puede completar el inicio de sesión.",
+	},
+	MsgAuthUnsupported: {
+		LangEnglish:            "This agent does not support signing in from chat.",
+		LangChinese:            "当前 agent 不支持在聊天中登录。",
+		LangTraditionalChinese: "目前 agent 不支援在聊天中登入。",
+		LangJapanese:           "このエージェントはチャットからのサインインに対応していません。",
+		LangSpanish:            "Este agente no admite iniciar sesión desde el chat.",
+	},
 	MsgFailedToStartAgentSession: {
 		LangEnglish:            "❌ Error: failed to start agent session",
 		LangChinese:            "❌ 错误: 启动 Agent 会话失败",
@@ -925,6 +1013,7 @@ var messages = map[MsgKey]map[Language]string{
 			"/usage\n  Show account/model quota usage\n\n" +
 			"/upgrade\n  Check for updates and self-update\n\n" +
 			"/restart\n  Restart cc-connect service\n\n" +
+			"/auth\n  Sign in again when credentials expire (paste the code back in chat)\n\n" +
 			"/status\n  Show system status\n\n" +
 			"/version\n  Show cc-connect version\n\n" +
 			"/whoami\n  Show your User ID (for allow_from / admin_from)\n\n" +
@@ -968,6 +1057,7 @@ var messages = map[MsgKey]map[Language]string{
 			"/usage\n  查看账号/模型限额使用情况\n\n" +
 			"/upgrade\n  检查更新并自动升级\n\n" +
 			"/restart\n  重启 cc-connect 服务\n\n" +
+			"/auth\n  凭据过期时重新登录（把验证码粘贴回聊天）\n\n" +
 			"/status\n  查看系统状态\n\n" +
 			"/version\n  查看 cc-connect 版本\n\n" +
 			"/whoami\n  查看你的 User ID（用于 allow_from / admin_from 配置）\n\n" +
@@ -1010,6 +1100,7 @@ var messages = map[MsgKey]map[Language]string{
 			"/usage\n  查看帳號/模型限額使用情況\n\n" +
 			"/upgrade\n  檢查更新並自動升級\n\n" +
 			"/restart\n  重啟 cc-connect 服務\n\n" +
+			"/auth\n  憑證過期時重新登入（把驗證碼貼回聊天）\n\n" +
 			"/status\n  查看系統狀態\n\n" +
 			"/version\n  查看 cc-connect 版本\n\n" +
 			"/whoami\n  查看你的 User ID（用於 allow_from / admin_from 設定）\n\n" +
@@ -1051,6 +1142,7 @@ var messages = map[MsgKey]map[Language]string{
 			"/usage\n  アカウント/モデル使用量を表示\n\n" +
 			"/upgrade\n  アップデートを確認して自動更新\n\n" +
 			"/restart\n  cc-connect サービスを再起動\n\n" +
+			"/auth\n  認証情報の期限切れ時に再サインイン（コードをチャットに貼り付け）\n\n" +
 			"/status\n  システム状態を表示\n\n" +
 			"/version\n  cc-connect のバージョンを表示\n\n" +
 			"/whoami\n  あなたの User ID を表示（allow_from / admin_from 設定用）\n\n" +
@@ -1092,6 +1184,7 @@ var messages = map[MsgKey]map[Language]string{
 			"/usage\n  Mostrar uso de cuota de cuenta/modelo\n\n" +
 			"/upgrade\n  Buscar actualizaciones y auto-actualizar\n\n" +
 			"/restart\n  Reiniciar el servicio cc-connect\n\n" +
+			"/auth\n  Volver a iniciar sesión cuando caduquen las credenciales (pega el código en el chat)\n\n" +
 			"/status\n  Mostrar estado del sistema\n\n" +
 			"/version\n  Mostrar versión de cc-connect\n\n" +
 			"/whoami\n  Mostrar tu User ID (para allow_from / admin_from)\n\n" +
