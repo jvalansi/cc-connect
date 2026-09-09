@@ -111,8 +111,10 @@ func TestMultiWorkspaceResolution_NoMatch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if ws != "" {
-		t.Errorf("expected empty workspace, got %q", ws)
+	// No base_dir/<channel-name> to match, so the channel falls back to
+	// base_dir itself rather than being left without a workspace.
+	if ws != normalizeWorkspacePath(baseDir) {
+		t.Errorf("expected base_dir fallback %q, got %q", normalizeWorkspacePath(baseDir), ws)
 	}
 	if name != "nonexistent-project" {
 		t.Errorf("expected channel name %q, got %q", "nonexistent-project", name)
@@ -205,8 +207,14 @@ func TestMultiWorkspaceResolution_SharedBindingDoesNotCrossPlatforms(t *testing.
 	if err != nil {
 		t.Fatalf("unexpected error for other platform: %v", err)
 	}
-	if ws != "" || name != "" {
-		t.Fatalf("expected no shared binding for other platform, got workspace=%q channelName=%q", ws, name)
+	// The other platform must not inherit the shared binding. It gets the
+	// base_dir fallback instead, which is the point of the assertion: not
+	// wsDir.
+	if ws == normalizeWorkspacePath(wsDir) {
+		t.Fatalf("shared binding leaked to another platform: %q", ws)
+	}
+	if ws != normalizeWorkspacePath(baseDir) || name != "" {
+		t.Fatalf("expected base_dir fallback for other platform, got workspace=%q channelName=%q", ws, name)
 	}
 }
 
@@ -682,16 +690,19 @@ func TestCommandContextWithWorkspace_UnboundChannelFallsBack(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if agent != e.agent {
-		t.Errorf("expected global e.agent when no binding exists, got different agent")
+	// An unbound channel now resolves to base_dir, so it gets a
+	// workspace-scoped agent and session manager rather than the globals.
+	want := normalizeWorkspacePath(baseDir)
+	if workspaceDir != want {
+		t.Errorf("expected base_dir fallback %q, got %q", want, workspaceDir)
 	}
-	if sessions != e.sessions {
-		t.Errorf("expected global e.sessions when no binding exists, got different manager")
+	if agent == nil {
+		t.Error("expected a workspace agent, got nil")
 	}
-	if workspaceDir != "" {
-		t.Errorf("expected empty workspaceDir when unbound, got %q", workspaceDir)
+	if sessions == nil {
+		t.Error("expected a workspace session manager, got nil")
 	}
-	if interactiveKey != msg.SessionKey {
-		t.Errorf("expected interactiveKey to equal sessionKey when unbound, got %q want %q", interactiveKey, msg.SessionKey)
+	if wantKey := want + ":" + msg.SessionKey; interactiveKey != wantKey {
+		t.Errorf("expected workspace-scoped interactiveKey %q, got %q", wantKey, interactiveKey)
 	}
 }
