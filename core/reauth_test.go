@@ -347,6 +347,54 @@ func TestCmdAuth_UnsupportedAgent(t *testing.T) {
 	}
 }
 
+func TestAuthGate_OpenWhenNoAdminConfigured(t *testing.T) {
+	// Wizard-generated configs set no admin_from. /auth must still work there,
+	// or the recovery path is unusable on exactly the installs that need it.
+	sess := newFakeReauthSession("https://claude.ai/oauth/authorize")
+	ag := &stubReauthAgent{session: sess}
+	e, p := newReauthTestEngine(t, ag)
+	e.SetAdminFrom("")
+
+	msg := authMsg("/auth")
+	msg.UserID = "anyone"
+	if !e.handleCommand(p, msg, "/auth") {
+		t.Fatal("/auth was not handled")
+	}
+
+	sent := p.getSent()
+	if len(sent) != 1 || !strings.Contains(sent[0], sess.URL()) {
+		t.Fatalf("expected the flow to start, got %v", sent)
+	}
+}
+
+func TestAuthGate_EnforcedWhenAdminConfigured(t *testing.T) {
+	sess := newFakeReauthSession("https://claude.ai/oauth/authorize")
+	ag := &stubReauthAgent{session: sess}
+	e, p := newReauthTestEngine(t, ag) // admin_from = "admin"
+
+	outsider := authMsg("/auth")
+	outsider.UserID = "not-the-admin"
+	if !e.handleCommand(p, outsider, "/auth") {
+		t.Fatal("/auth was not handled")
+	}
+	sent := p.getSent()
+	if len(sent) != 1 || strings.Contains(sent[0], sess.URL()) {
+		t.Fatalf("a non-admin started the flow: %v", sent)
+	}
+	if ag.startCount() != 0 {
+		t.Errorf("StartReauth ran for a non-admin (%d calls)", ag.startCount())
+	}
+
+	// The configured admin still gets through.
+	p.clearSent()
+	if !e.handleCommand(p, authMsg("/auth"), "/auth") {
+		t.Fatal("/auth was not handled for the admin")
+	}
+	if sent := p.getSent(); len(sent) != 1 || !strings.Contains(sent[0], sess.URL()) {
+		t.Fatalf("expected the admin to start the flow, got %v", sent)
+	}
+}
+
 // waitForSent waits for a message containing want to reach the platform.
 func waitForSent(t *testing.T, p *stubPlatformEngine, want string) {
 	t.Helper()

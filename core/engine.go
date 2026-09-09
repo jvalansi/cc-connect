@@ -900,7 +900,6 @@ func (e *Engine) SetAdminFrom(adminFrom string) {
 
 // privilegedCommands are commands that require admin_from authorization.
 var privilegedCommands = map[string]bool{
-	"auth":    true,
 	"shell":   true,
 	"show":    true,
 	"dir":     true,
@@ -908,6 +907,23 @@ var privilegedCommands = map[string]bool{
 	"upgrade": true,
 	"web":     true,
 	"diff":    true,
+}
+
+// adminWhenConfigured lists commands that require admin rights only when
+// admin_from is actually set. /auth is the recovery path for expired
+// credentials, and the wizard-generated configs used by hosted instances set
+// no admin_from — under the fail-closed rule nobody could run it, stranding
+// exactly the users it exists for. When an admin list is configured it is
+// honored in full; otherwise the platform's own allow_from is the gate.
+var adminWhenConfigured = map[string]bool{
+	"auth": true,
+}
+
+// hasAdminConfigured reports whether an admin list is configured at all.
+func (e *Engine) hasAdminConfigured() bool {
+	e.userRolesMu.RLock()
+	defer e.userRolesMu.RUnlock()
+	return e.adminFrom != ""
 }
 
 // isAdmin checks whether the given user ID is authorized for privileged commands.
@@ -4699,6 +4715,26 @@ func (e *Engine) handleCommand(p Platform, msg *Message, raw string) bool {
 			"project", e.name, "command", cmdID, "reason", "unauthorized")
 		e.reply(p, msg.ReplyCtx, fmt.Sprintf(e.i18n.T(MsgAdminRequired), "/"+cmdID))
 		return true
+	}
+
+	if cmdID != "" && adminWhenConfigured[cmdID] {
+		if e.hasAdminConfigured() {
+			if !e.isAdmin(msg.UserID) {
+				slog.Info("audit: command_blocked",
+					"user_id", msg.UserID, "platform", msg.Platform,
+					"project", e.name, "command", cmdID, "reason", "unauthorized")
+				e.reply(p, msg.ReplyCtx, fmt.Sprintf(e.i18n.T(MsgAdminRequired), "/"+cmdID))
+				return true
+			}
+		} else {
+			// Deliberately open: without admin_from the only gate left is the
+			// platform allow_from. Log it so an unexpectedly permissive
+			// deployment is visible after the fact.
+			slog.Warn("audit: admin_gate_open",
+				"user_id", msg.UserID, "platform", msg.Platform,
+				"project", e.name, "command", cmdID,
+				"reason", "no admin_from configured; allow_from is the only gate")
+		}
 	}
 
 	if cmdID != "" {
