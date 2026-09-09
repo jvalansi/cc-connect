@@ -19,11 +19,21 @@ import (
 	"time"
 )
 
-const (
-	githubReleasesAPI = "https://api.github.com/repos/chenhg5/cc-connect/releases"
-	giteeReleasesAPI  = "https://gitee.com/api/v5/repos/cg33/cc-connect/releases"
-	githubDownload    = "https://github.com/chenhg5/cc-connect/releases/download"
-	giteeDownload     = "https://gitee.com/cg33/cc-connect/releases/download"
+// Release sources. These must name the repository this binary was built
+// from, not upstream: a hosted instance running a fork build would otherwise
+// "update" itself onto an upstream release and silently lose whatever the
+// fork adds. Overridable at build time via -ldflags -X for anyone running
+// their own channel.
+var (
+	githubReleasesAPI = "https://api.github.com/repos/jvalansi/cc-connect/releases"
+	githubDownload    = "https://github.com/jvalansi/cc-connect/releases/download"
+
+	// No Gitee mirror for this fork. Left empty rather than pointing at
+	// upstream's: with the fork's own releases empty, the fallback would
+	// happily return upstream builds and reintroduce the downgrade this
+	// change exists to prevent. Empty sources are skipped.
+	giteeReleasesAPI = ""
+	giteeDownload    = ""
 )
 
 type ReleaseInfo struct {
@@ -75,25 +85,35 @@ func fetchReleases(preferGitee bool) ([]ReleaseInfo, error) {
 		name string
 		url  string
 	}
-	sources := []source{
-		{"github", githubReleasesAPI + "?per_page=20"},
-		{"gitee", giteeReleasesAPI + "?per_page=20&direction=desc&sort=created"},
+	var sources []source
+	if githubReleasesAPI != "" {
+		sources = append(sources, source{"github", githubReleasesAPI + "?per_page=20"})
 	}
-	if preferGitee {
-		sources[0], sources[1] = sources[1], sources[0]
+	if giteeReleasesAPI != "" {
+		g := source{"gitee", giteeReleasesAPI + "?per_page=20&direction=desc&sort=created"}
+		if preferGitee {
+			sources = append([]source{g}, sources...)
+		} else {
+			sources = append(sources, g)
+		}
+	}
+	if len(sources) == 0 {
+		return nil, fmt.Errorf("no release source configured")
 	}
 
-	releases, err := fetchReleasesFrom(sources[0].url)
-	if err == nil && len(releases) > 0 {
-		return releases, nil
+	var lastErr error
+	for _, src := range sources {
+		releases, err := fetchReleasesFrom(src.url)
+		if err == nil && len(releases) > 0 {
+			return releases, nil
+		}
+		lastErr = err
+		slog.Debug("updater: source returned nothing", "source", src.name, "error", err)
 	}
-	slog.Debug("updater: primary source failed, trying fallback", "primary", sources[0].name, "error", err)
-
-	releases, err = fetchReleasesFrom(sources[1].url)
-	if err != nil {
-		return nil, fmt.Errorf("check updates failed (both sources): %w", err)
+	if lastErr != nil {
+		return nil, fmt.Errorf("check updates failed: %w", lastErr)
 	}
-	return releases, nil
+	return nil, nil
 }
 
 func fetchReleasesFrom(apiURL string) ([]ReleaseInfo, error) {
@@ -134,11 +154,20 @@ func SelfUpdate(tag string, preferGitee bool) error {
 	}
 	filename := fmt.Sprintf("cc-connect-%s-%s-%s%s", tag, goos, goarch, ext)
 
-	giteeURL := fmt.Sprintf("%s/%s/%s", giteeDownload, tag, filename)
-	githubURL := fmt.Sprintf("%s/%s/%s", githubDownload, tag, filename)
-	urls := []string{githubURL, giteeURL}
-	if preferGitee {
-		urls = []string{giteeURL, githubURL}
+	var urls []string
+	if githubDownload != "" {
+		urls = append(urls, fmt.Sprintf("%s/%s/%s", githubDownload, tag, filename))
+	}
+	if giteeDownload != "" {
+		g := fmt.Sprintf("%s/%s/%s", giteeDownload, tag, filename)
+		if preferGitee {
+			urls = append([]string{g}, urls...)
+		} else {
+			urls = append(urls, g)
+		}
+	}
+	if len(urls) == 0 {
+		return fmt.Errorf("no download source configured")
 	}
 
 	var data []byte
