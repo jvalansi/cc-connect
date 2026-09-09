@@ -1,6 +1,9 @@
 package core
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestSemverCompare(t *testing.T) {
 	tests := []struct {
@@ -83,5 +86,32 @@ func TestNormalizeVersion(t *testing.T) {
 		if got != tt.want {
 			t.Errorf("normalizeVersion(%q) = %q, want %q", tt.in, got, tt.want)
 		}
+	}
+}
+
+func TestFetchReleases_NoUpstreamFallback(t *testing.T) {
+	// The fork has no Gitee mirror. If the Gitee source were left pointing at
+	// upstream, an empty fork release list would fall through to it and offer
+	// upstream builds — silently downgrading a hosted instance off the fork.
+	if giteeReleasesAPI != "" {
+		t.Errorf("giteeReleasesAPI = %q, want empty so it is skipped", giteeReleasesAPI)
+	}
+	if giteeDownload != "" {
+		t.Errorf("giteeDownload = %q, want empty so it is skipped", giteeDownload)
+	}
+	for _, u := range []string{githubReleasesAPI, githubDownload} {
+		if !strings.Contains(u, "jvalansi/cc-connect") {
+			t.Errorf("release source %q does not point at this fork", u)
+		}
+	}
+}
+
+func TestFetchReleases_NoSourcesConfigured(t *testing.T) {
+	origAPI, origGitee := githubReleasesAPI, giteeReleasesAPI
+	githubReleasesAPI, giteeReleasesAPI = "", ""
+	defer func() { githubReleasesAPI, giteeReleasesAPI = origAPI, origGitee }()
+
+	if _, err := fetchReleases(false); err == nil {
+		t.Fatal("fetchReleases succeeded with no sources configured")
 	}
 }

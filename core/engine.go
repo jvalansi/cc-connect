@@ -282,6 +282,9 @@ type Engine struct {
 	bannedWords []string
 	bannedMu    sync.RWMutex
 
+	// reauth tracks an in-flight /auth flow (see reauth.go).
+	reauth reauthState
+
 	disabledCmds map[string]bool
 	adminFrom    string           // comma-separated user IDs for privileged commands; "*" = all allowed users; "" = deny
 	userRoles    *UserRoleManager // nil = legacy mode (no per-user policies)
@@ -904,6 +907,23 @@ var privilegedCommands = map[string]bool{
 	"upgrade": true,
 	"web":     true,
 	"diff":    true,
+}
+
+// adminWhenConfigured lists commands that require admin rights only when
+// admin_from is actually set. /auth is the recovery path for expired
+// credentials, and the wizard-generated configs used by hosted instances set
+// no admin_from — under the fail-closed rule nobody could run it, stranding
+// exactly the users it exists for. When an admin list is configured it is
+// honored in full; otherwise the platform's own allow_from is the gate.
+var adminWhenConfigured = map[string]bool{
+	"auth": true,
+}
+
+// hasAdminConfigured reports whether an admin list is configured at all.
+func (e *Engine) hasAdminConfigured() bool {
+	e.userRolesMu.RLock()
+	defer e.userRolesMu.RUnlock()
+	return e.adminFrom != ""
 }
 
 // isAdmin checks whether the given user ID is authorized for privileged commands.
@@ -2104,6 +2124,11 @@ func (e *Engine) handleMessage(p Platform, msg *Message) {
 
 	// Pending provider add (card-driven multi-step flow)
 	if e.handlePendingProviderAdd(p, msg, content) {
+		return
+	}
+
+	// Authorization code pasted in reply to /auth
+	if len(msg.Images) == 0 && e.handlePendingReauthCode(p, msg, content) {
 		return
 	}
 
@@ -3388,7 +3413,15 @@ func (e *Engine) runUnsolicitedReader(ctx context.Context, cancel context.Cancel
 			case EventError:
 				if event.Error != nil {
 					slog.Error("unsolicited agent error", "error", event.Error, "session", sessionKey)
-					e.send(p, replyCtx, fmt.Sprintf(e.i18n.T(MsgError), event.Error))
+					errMsg := event.Error.Error()
+					state.mu.Lock()
+					stateAgent := state.agent
+					state.mu.Unlock()
+					userMsg := fmt.Sprintf(e.i18n.T(MsgError), errMsg)
+					if hint, ok := e.authErrorHint(stateAgent, errMsg); ok {
+						userMsg = hint
+					}
+					e.send(p, replyCtx, userMsg)
 				}
 				state.mu.Lock()
 				state.eventsNeedResync = true
@@ -4318,10 +4351,19 @@ func (e *Engine) processInteractiveEvents(state *interactiveState, session *Sess
 					Error:      event.Error.Error(),
 				})
 				userMsg := fmt.Sprintf(e.i18n.T(MsgError), errMsg)
-				for _, h := range agentErrorHandlers {
-					if strings.Contains(errMsg, h.contains) {
-						userMsg = e.i18n.T(h.msgKey)
-						break
+				state.mu.Lock()
+				stateAgent := state.agent
+				state.mu.Unlock()
+				if hint, ok := e.authErrorHint(stateAgent, errMsg); ok {
+					// Expired credentials are user-fixable — point at /auth
+					// instead of relaying a raw provider error.
+					userMsg = hint
+				} else {
+					for _, h := range agentErrorHandlers {
+						if strings.Contains(errMsg, h.contains) {
+							userMsg = e.i18n.T(h.msgKey)
+							break
+						}
 					}
 				}
 				e.send(p, replyCtx, userMsg)
@@ -4555,6 +4597,7 @@ var builtinCommands = []struct {
 	{[]string{"web"}, "web"},
 	{[]string{"diff"}, "diff"},
 	{[]string{"ps", "btw"}, "ps"},
+	{[]string{"auth", "login"}, "auth"},
 }
 
 func (e *Engine) cmdPs(p Platform, msg *Message, args []string) {
@@ -4674,6 +4717,26 @@ func (e *Engine) handleCommand(p Platform, msg *Message, raw string) bool {
 		return true
 	}
 
+	if cmdID != "" && adminWhenConfigured[cmdID] {
+		if e.hasAdminConfigured() {
+			if !e.isAdmin(msg.UserID) {
+				slog.Info("audit: command_blocked",
+					"user_id", msg.UserID, "platform", msg.Platform,
+					"project", e.name, "command", cmdID, "reason", "unauthorized")
+				e.reply(p, msg.ReplyCtx, fmt.Sprintf(e.i18n.T(MsgAdminRequired), "/"+cmdID))
+				return true
+			}
+		} else {
+			// Deliberately open: without admin_from the only gate left is the
+			// platform allow_from. Log it so an unexpectedly permissive
+			// deployment is visible after the fact.
+			slog.Warn("audit: admin_gate_open",
+				"user_id", msg.UserID, "platform", msg.Platform,
+				"project", e.name, "command", cmdID,
+				"reason", "no admin_from configured; allow_from is the only gate")
+		}
+	}
+
 	if cmdID != "" {
 		slog.Info("audit: command_executed",
 			"user_id", msg.UserID, "platform", msg.Platform,
@@ -4747,6 +4810,8 @@ func (e *Engine) handleCommand(p Platform, msg *Message, raw string) bool {
 		e.cmdBind(p, msg, args)
 	case "search":
 		e.cmdSearch(p, msg, args)
+	case "auth":
+		e.cmdAuth(p, msg, args)
 	case "shell":
 		e.cmdShell(p, msg, raw)
 	case "diff":

@@ -155,6 +155,37 @@ type SystemPromptSupporter interface {
 	HasSystemPromptSupport() bool
 }
 
+// ReauthSession is one in-flight interactive re-authentication attempt. The
+// user opens URL(), copies the code the provider shows them, and the caller
+// hands it back via SubmitCode. Wait blocks until the attempt resolves.
+//
+// Implementations must be safe for concurrent use: SubmitCode and Cancel may
+// be called from a different goroutine than Wait.
+type ReauthSession interface {
+	// URL is the address the user must open to authorize. Never empty for a
+	// session returned by StartReauth.
+	URL() string
+	// SubmitCode delivers the authorization code the user pasted back.
+	SubmitCode(code string) error
+	// Wait blocks until the login completes, fails, or ctx is done. A nil
+	// return means the agent is authenticated again.
+	Wait(ctx context.Context) error
+	// Cancel aborts the attempt and releases its resources. Safe to call
+	// more than once.
+	Cancel()
+}
+
+// AgentReauthenticator is an optional interface for agents whose credentials
+// can expire and be renewed interactively without shell access — the engine
+// drives the flow from the chat thread the failure surfaced in.
+//
+// IsAuthError classifies an agent error message so the engine can offer the
+// flow instead of relaying a raw provider error to the user.
+type AgentReauthenticator interface {
+	IsAuthError(msg string) bool
+	StartReauth(ctx context.Context) (ReauthSession, error)
+}
+
 // TypingIndicator is an optional interface for platforms that can show a
 // "processing" indicator (typing bubble, emoji reaction, etc.) while the
 // agent is working. StartTyping is called when processing begins and returns

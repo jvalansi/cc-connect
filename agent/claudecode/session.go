@@ -442,6 +442,21 @@ func (cs *claudeSession) handleResult(raw map[string]any) {
 		cs.sessionID.Store(sid)
 	}
 
+	// A CLI-level failure can arrive as a result payload with is_error set
+	// rather than on stderr. Relaying it verbatim would show the user a raw
+	// provider error as if it were the agent's answer, so credential failures
+	// are re-raised as error events for the engine to handle. Gated on
+	// is_error so a turn where the agent merely *reports* a 401 from some
+	// third-party API is left alone.
+	if isErr, _ := raw["is_error"].(bool); isErr && isAuthErrorText(content) {
+		evt := core.Event{Type: core.EventError, Error: fmt.Errorf("%s", strings.TrimSpace(content))}
+		select {
+		case cs.events <- evt:
+		case <-cs.ctx.Done():
+		}
+		return
+	}
+
 	var inputTokens, outputTokens int
 	if usage, ok := raw["usage"].(map[string]any); ok {
 		if v, ok := usage["input_tokens"].(float64); ok {
