@@ -82,8 +82,42 @@ info "Node $(node --version)  npm $(npm --version)"
 # ── cc-connect ────────────────────────────────────────────────────────────────
 section "Installing cc-connect"
 
-npm install -g cc-connect --silent
-CC_BIN=$(which cc-connect)
+# Installed from this repository's own releases rather than the upstream npm
+# package. The npm package ships upstream builds, so an install (or a later
+# `cc-connect update`) would replace this fork's binary with one that lacks
+# whatever the fork adds. One artifact source for both install and upgrade.
+CC_REPO="${CC_REPO:-jvalansi/cc-connect}"
+CC_INSTALL_PATH="${CC_INSTALL_PATH:-/usr/bin/cc-connect}"
+
+case "$(uname -m)" in
+    x86_64|amd64)  CC_ARCH=amd64 ;;
+    aarch64|arm64) CC_ARCH=arm64 ;;
+    *) die "Unsupported architecture: $(uname -m)" ;;
+esac
+
+if [[ -z "${CC_VERSION:-}" ]]; then
+    CC_VERSION=$(curl -fsSL "https://api.github.com/repos/${CC_REPO}/releases/latest" \
+        | grep -m1 '"tag_name"' | cut -d'"' -f4 || true)
+fi
+[[ -n "$CC_VERSION" ]] || die "Could not determine the latest ${CC_REPO} release. Set CC_VERSION=vX.Y.Z and re-run."
+
+CC_TARBALL="cc-connect-${CC_VERSION}-linux-${CC_ARCH}.tar.gz"
+CC_URL="https://github.com/${CC_REPO}/releases/download/${CC_VERSION}/${CC_TARBALL}"
+CC_TMP=$(mktemp -d)
+
+info "Downloading ${CC_VERSION} (linux/${CC_ARCH})…"
+curl -fsSL "$CC_URL" -o "${CC_TMP}/${CC_TARBALL}" || die "Download failed: ${CC_URL}"
+tar xzf "${CC_TMP}/${CC_TARBALL}" -C "$CC_TMP" || die "Could not unpack ${CC_TARBALL}"
+
+CC_EXTRACTED=$(find "$CC_TMP" -type f -name 'cc-connect*' ! -name '*.tar.gz' | head -1)
+[[ -n "$CC_EXTRACTED" ]] || die "No cc-connect binary inside ${CC_TARBALL}"
+
+# Replace rather than overwrite: the running binary's inode stays busy.
+[[ -f "$CC_INSTALL_PATH" ]] && mv "$CC_INSTALL_PATH" "${CC_INSTALL_PATH}.bak.$(date +%Y%m%d%H%M%S)"
+install -m 755 "$CC_EXTRACTED" "$CC_INSTALL_PATH"
+rm -rf "$CC_TMP"
+
+CC_BIN="$CC_INSTALL_PATH"
 info "cc-connect $(${CC_BIN} --version 2>&1 | head -1)  →  ${CC_BIN}"
 
 # ── Claude Code ───────────────────────────────────────────────────────────────
@@ -193,9 +227,11 @@ Environment="PATH=${NODE_BIN_DIR}:${SERVICE_HOME}/.local/bin:/usr/local/sbin:/us
 WantedBy=multi-user.target
 EOF
 
-# Open firewall port for wizard
+# The wizard authenticates nothing and runs as root, so port 8080 is
+# deliberately NOT opened here. Reach it over an SSH tunnel, or restrict it to
+# a management address (see scripts/wizard_firewall.sh in the hosting repo).
 if command -v ufw &>/dev/null && ufw status 2>/dev/null | grep -q "Status: active"; then
-    ufw allow 8080/tcp comment "cc-connect wizard" >/dev/null
+    ufw delete allow 8080/tcp >/dev/null 2>&1 || true
 fi
 
 systemctl daemon-reload
