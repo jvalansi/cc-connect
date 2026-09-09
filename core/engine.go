@@ -13195,18 +13195,26 @@ func (e *Engine) resolveWorkspace(p Platform, channelID string) (string, string,
 		}
 	}
 
-	if channelName == "" {
-		return "", "", nil
+	// Step 3: Convention match — check if base_dir/<channel-name> exists
+	if channelName != "" {
+		candidate := filepath.Join(e.baseDir, channelName)
+		if info, err := os.Stat(candidate); err == nil && info.IsDir() {
+			// Auto-bind
+			projectKey := "project:" + e.name
+			normalized := normalizeWorkspacePath(candidate)
+			e.workspaceBindings.Bind(projectKey, channelKey, channelName, normalized)
+			slog.Info("workspace auto-bound by convention",
+				"channel", channelName, "workspace", normalized)
+			return normalized, channelName, nil
+		}
 	}
 
-	// Step 3: Convention match — check if base_dir/<channel-name> exists
-	candidate := filepath.Join(e.baseDir, channelName)
-	if info, err := os.Stat(candidate); err == nil && info.IsDir() {
-		// Auto-bind
+	// Step 4: Fallback — auto-bind to base_dir itself
+	if info, err := os.Stat(e.baseDir); err == nil && info.IsDir() {
 		projectKey := "project:" + e.name
-		normalized := normalizeWorkspacePath(candidate)
+		normalized := normalizeWorkspacePath(e.baseDir)
 		e.workspaceBindings.Bind(projectKey, channelKey, channelName, normalized)
-		slog.Info("workspace auto-bound by convention",
+		slog.Info("workspace auto-bound to base_dir fallback",
 			"channel", channelName, "workspace", normalized)
 		return normalized, channelName, nil
 	}
