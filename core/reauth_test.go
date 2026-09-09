@@ -272,6 +272,17 @@ func TestCmdAuth_SupersedesEarlierAttempt(t *testing.T) {
 	if e.reauth.pending == nil || e.reauth.pending.session != second {
 		t.Error("the newest attempt is not the pending one")
 	}
+
+	// The superseded attempt dying must not contradict the fresh link the
+	// user was just handed.
+	p.clearSent()
+	first.finish(errors.New("killed"))
+	time.Sleep(100 * time.Millisecond)
+	for _, s := range p.getSent() {
+		if strings.Contains(s, "Sign-in failed") {
+			t.Errorf("superseded attempt reported a failure: %q", s)
+		}
+	}
 }
 
 func TestCmdAuth_CancelAndNoPending(t *testing.T) {

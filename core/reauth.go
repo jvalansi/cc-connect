@@ -134,11 +134,20 @@ func (e *Engine) awaitReauth(ctx context.Context, pr *pendingReauth) {
 	err := pr.session.Wait(ctx)
 
 	e.reauth.mu.Lock()
-	if e.reauth.pending == pr {
+	current := e.reauth.pending == pr
+	if current {
 		e.reauth.pending = nil
 	}
 	e.reauth.mu.Unlock()
 	pr.cancel()
+
+	// A superseded or cancelled attempt dies by design. The user already got
+	// a fresh link or a cancellation notice; reporting its death as a failure
+	// would contradict what they were just told.
+	if !current {
+		slog.Debug("reauth: superseded attempt resolved", "error", err, "user_id", pr.userID)
+		return
+	}
 
 	if err != nil {
 		slog.Warn("reauth: failed", "error", err, "user_id", pr.userID)
