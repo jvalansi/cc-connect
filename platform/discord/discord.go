@@ -66,6 +66,27 @@ type Platform struct {
 	seenMsgs                   sync.Map // message ID dedup: prevents duplicate MessageCreate events
 	seenInteractions           sync.Map // interaction ID dedup: prevents duplicate slash/button events
 	self                       core.Platform
+
+	// Gateway health. discordgo reports a connection as open as soon as it
+	// has written IDENTIFY/RESUME, and its own watchdog only checks heartbeat
+	// ACKs, so a resume Discord silently drops leaves a live, ACKing socket
+	// that never delivers an event. gwConfirmed tracks whether Discord has
+	// actually confirmed a session (READY/RESUMED) on the current connection.
+	gwMu            sync.Mutex
+	gwConfirmed     bool
+	gwEverConfirmed bool
+	gwUnconfirmedAt time.Time
+	gwStopping      bool
+	gwStopCh        chan struct{}
+	gwStopOnce      sync.Once
+	gwWatchOnce     sync.Once
+
+	// lastSeenMsgs is the newest message ID observed per served channel. It
+	// anchors the post-reconnect backfill: Discord never redelivers events
+	// after a session is invalidated, so anything sent during an outage has
+	// to be fetched over REST.
+	lastSeenMu   sync.Mutex
+	lastSeenMsgs map[string]string
 }
 
 func New(opts map[string]any) (core.Platform, error) {
@@ -133,6 +154,8 @@ func New(opts map[string]any) (core.Platform, error) {
 		groupReplyAll:              groupReplyAll,
 		shareSessionInChannel:      shareSessionInChannel,
 		readyCh:                    make(chan struct{}),
+		gwStopCh:                   make(chan struct{}),
+		lastSeenMsgs:               make(map[string]string),
 		threadIsolation:            threadIsolation,
 		respondToAtEveryoneAndHere: respondToAtEveryoneAndHere,
 		proxyURL:                   proxyU,
@@ -528,12 +551,17 @@ func (p *Platform) Start(handler core.MessageHandler) error {
 	}
 	p.session = session
 
+	// discordgo defaults to LogError, which hides the reconnect/resume
+	// bookkeeping needed to diagnose a gateway that goes deaf.
+	session.LogLevel = discordgo.LogWarning
+
 	session.Identify.Intents = discordgo.IntentsGuilds | discordgo.IntentsGuildMessages | discordgo.IntentsDirectMessages | discordgo.IntentMessageContent
 
 	session.AddHandler(func(s *discordgo.Session, r *discordgo.Ready) {
 		p.botID = r.User.ID
 		p.appID = r.User.ID
 		slog.Info("discord: connected", "bot", r.User.Username+"#"+r.User.Discriminator)
+		p.markGatewayConfirmed("ready")
 		// Signal readiness before guild role lookups so RegisterCommands
 		// is not blocked by slow API calls when there are many guilds.
 		select {
@@ -549,6 +577,14 @@ func (p *Platform) Start(handler core.MessageHandler) error {
 		}
 	})
 
+	session.AddHandler(func(s *discordgo.Session, r *discordgo.Resumed) {
+		p.markGatewayConfirmed("resumed")
+	})
+
+	session.AddHandler(func(s *discordgo.Session, d *discordgo.Disconnect) {
+		p.markGatewayUnconfirmed("disconnected")
+	})
+
 	session.AddHandler(func(s *discordgo.Session, g *discordgo.GuildCreate) {
 		if g == nil || g.Guild == nil || g.ID == "" || g.Unavailable {
 			return
@@ -557,91 +593,7 @@ func (p *Platform) Start(handler core.MessageHandler) error {
 	})
 
 	session.AddHandler(func(s *discordgo.Session, m *discordgo.MessageCreate) {
-		// Deduplicate: Discord gateway may deliver the same event twice
-		if !rememberDedupID(&p.seenMsgs, m.ID) {
-			slog.Debug("discord: ignoring duplicate message", "msg_id", m.ID)
-			return
-		}
-
-		if m.Author.Bot || m.Author.ID == p.botID {
-			return
-		}
-		if core.IsOldMessage(m.Timestamp) {
-			slog.Debug("discord: ignoring old message after restart", "timestamp", m.Timestamp)
-			return
-		}
-		if !core.AllowList(p.allowFrom, m.Author.ID) {
-			slog.Debug("discord: message from unauthorized user", "user", m.Author.ID)
-			return
-		}
-		if len(p.allowedChannels) > 0 {
-			if _, ok := p.allowedChannels[m.ChannelID]; !ok {
-				slog.Debug("discord: message from non-allowed channel", "channel", m.ChannelID)
-				return
-			}
-		}
-		if len(p.deniedChannels) > 0 {
-			if _, ok := p.deniedChannels[m.ChannelID]; ok {
-				slog.Debug("discord: message from denied channel", "channel", m.ChannelID)
-				return
-			}
-		}
-
-		// In guild channels, only respond when the bot is @mentioned (unless group_reply_all).
-		// Check both user mentions and role mentions (Discord auto-creates a managed role
-		// for each bot; users may @ the role instead of the user).
-		botRoleID := p.botRoleIDForGuild(m.GuildID)
-		if botRoleID == "" && m.GuildID != "" {
-			p.cacheBotRoleIDForGuild(s, m.GuildID, nil)
-			botRoleID = p.botRoleIDForGuild(m.GuildID)
-		}
-		if m.GuildID != "" && !p.groupReplyAll {
-			if !isDiscordBotMention(m, p.botID, botRoleID, p.respondToAtEveryoneAndHere) {
-				slog.Debug("discord: ignoring guild message without bot mention", "channel", m.ChannelID)
-				return
-			}
-			m.Content = stripDiscordMentionWithRole(m.Content, p.botID, botRoleID)
-			if m.MentionEveryone {
-				m.Content = stripEveryoneHere(m.Content)
-			}
-		}
-
-		slog.Debug("discord: message received", "user", m.Author.Username, "channel", m.ChannelID)
-
-		sessionKey := p.makeSessionKey(m.ChannelID, m.Author.ID)
-		rctx := replyContext{channelID: m.ChannelID, messageID: m.ID}
-		// channelKey pins workspace binding to the parent channel even when
-		// thread_isolation rewrites SessionKey to a thread ID. Without it,
-		// effectiveChannelID() would extract the thread ID from SessionKey
-		// and multi-workspace auto-bind would try to match `<base_dir>/<thread-name>`,
-		// which never exists. Empty value falls back to SessionKey extraction
-		// (the historical, non-isolated behavior).
-		channelKey := ""
-		if p.threadIsolation && m.GuildID != "" {
-			threadSessionKey, threadCtx, parentChannelID, err := resolveThreadReplyContext(m, p.botID, sessionThreadOps{session: p.session})
-			if err != nil {
-				slog.Warn("discord: thread isolation setup failed, falling back", "message", m.ID, "channel", m.ChannelID, "error", err)
-			} else {
-				sessionKey = threadSessionKey
-				rctx = threadCtx
-				channelKey = parentChannelID
-			}
-		}
-
-		images, files, audio := classifyAttachments(m.Attachments, downloadURL)
-
-		if m.Content == "" && len(images) == 0 && len(files) == 0 && audio == nil {
-			return
-		}
-
-		msg := &core.Message{
-			SessionKey: sessionKey, ChannelKey: channelKey, Platform: "discord",
-			MessageID: m.ID,
-			UserID:    m.Author.ID, UserName: m.Author.Username,
-			ChatName: p.resolveChannelName(m.ChannelID),
-			Content:  m.Content, Images: images, Files: files, Audio: audio, ReplyCtx: rctx,
-		}
-		p.dispatchMessage(msg)
+		p.handleMessageCreate(s, m)
 	})
 
 	session.AddHandler(func(s *discordgo.Session, i *discordgo.InteractionCreate) {
@@ -652,7 +604,105 @@ func (p *Platform) Start(handler core.MessageHandler) error {
 		return fmt.Errorf("discord: open gateway: %w", err)
 	}
 
+	p.armGatewayClock()
+	p.gwWatchOnce.Do(func() { go p.watchGateway() })
+
 	return nil
+}
+
+// handleMessageCreate processes one inbound message. It is shared by the
+// gateway MESSAGE_CREATE handler and by backfillMissed, so replayed messages
+// go through exactly the same dedup, allow-list and mention gating.
+func (p *Platform) handleMessageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
+	// Deduplicate: Discord gateway may deliver the same event twice
+	if !rememberDedupID(&p.seenMsgs, m.ID) {
+		slog.Debug("discord: ignoring duplicate message", "msg_id", m.ID)
+		return
+	}
+
+	if m.Author.Bot || m.Author.ID == p.botID {
+		return
+	}
+	if core.IsOldMessage(m.Timestamp) {
+		slog.Debug("discord: ignoring old message after restart", "timestamp", m.Timestamp)
+		return
+	}
+	if !core.AllowList(p.allowFrom, m.Author.ID) {
+		slog.Debug("discord: message from unauthorized user", "user", m.Author.ID)
+		return
+	}
+	if len(p.allowedChannels) > 0 {
+		if _, ok := p.allowedChannels[m.ChannelID]; !ok {
+			slog.Debug("discord: message from non-allowed channel", "channel", m.ChannelID)
+			return
+		}
+	}
+	if len(p.deniedChannels) > 0 {
+		if _, ok := p.deniedChannels[m.ChannelID]; ok {
+			slog.Debug("discord: message from denied channel", "channel", m.ChannelID)
+			return
+		}
+	}
+
+	// This is a channel we serve: anchor the backfill window here, before the
+	// mention gating, so ordinary chatter does not get refetched later.
+	p.rememberLastSeen(m.ChannelID, m.ID)
+
+	// In guild channels, only respond when the bot is @mentioned (unless group_reply_all).
+	// Check both user mentions and role mentions (Discord auto-creates a managed role
+	// for each bot; users may @ the role instead of the user).
+	botRoleID := p.botRoleIDForGuild(m.GuildID)
+	if botRoleID == "" && m.GuildID != "" {
+		p.cacheBotRoleIDForGuild(s, m.GuildID, nil)
+		botRoleID = p.botRoleIDForGuild(m.GuildID)
+	}
+	if m.GuildID != "" && !p.groupReplyAll {
+		if !isDiscordBotMention(m, p.botID, botRoleID, p.respondToAtEveryoneAndHere) {
+			slog.Debug("discord: ignoring guild message without bot mention", "channel", m.ChannelID)
+			return
+		}
+		m.Content = stripDiscordMentionWithRole(m.Content, p.botID, botRoleID)
+		if m.MentionEveryone {
+			m.Content = stripEveryoneHere(m.Content)
+		}
+	}
+
+	slog.Debug("discord: message received", "user", m.Author.Username, "channel", m.ChannelID)
+
+	sessionKey := p.makeSessionKey(m.ChannelID, m.Author.ID)
+	rctx := replyContext{channelID: m.ChannelID, messageID: m.ID}
+	// channelKey pins workspace binding to the parent channel even when
+	// thread_isolation rewrites SessionKey to a thread ID. Without it,
+	// effectiveChannelID() would extract the thread ID from SessionKey
+	// and multi-workspace auto-bind would try to match `<base_dir>/<thread-name>`,
+	// which never exists. Empty value falls back to SessionKey extraction
+	// (the historical, non-isolated behavior).
+	channelKey := ""
+	if p.threadIsolation && m.GuildID != "" {
+		threadSessionKey, threadCtx, parentChannelID, err := resolveThreadReplyContext(m, p.botID, sessionThreadOps{session: p.session})
+		if err != nil {
+			slog.Warn("discord: thread isolation setup failed, falling back", "message", m.ID, "channel", m.ChannelID, "error", err)
+		} else {
+			sessionKey = threadSessionKey
+			rctx = threadCtx
+			channelKey = parentChannelID
+		}
+	}
+
+	images, files, audio := classifyAttachments(m.Attachments, downloadURL)
+
+	if m.Content == "" && len(images) == 0 && len(files) == 0 && audio == nil {
+		return
+	}
+
+	msg := &core.Message{
+		SessionKey: sessionKey, ChannelKey: channelKey, Platform: "discord",
+		MessageID: m.ID,
+		UserID:    m.Author.ID, UserName: m.Author.Username,
+		ChatName: p.resolveChannelName(m.ChannelID),
+		Content:  m.Content, Images: images, Files: files, Audio: audio, ReplyCtx: rctx,
+	}
+	p.dispatchMessage(msg)
 }
 
 // handleInteraction processes incoming Discord command and button interactions.
@@ -1215,6 +1265,10 @@ func (p *Platform) resolveChannelName(channelID string) string {
 }
 
 func (p *Platform) Stop() error {
+	p.gwMu.Lock()
+	p.gwStopping = true
+	p.gwMu.Unlock()
+	p.gwStopOnce.Do(func() { close(p.gwStopCh) })
 	if p.session != nil {
 		return p.session.Close()
 	}
