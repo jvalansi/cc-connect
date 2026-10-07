@@ -10560,6 +10560,47 @@ func TestExecuteCronJob_ResolvesCronReplyTarget(t *testing.T) {
 	}
 }
 
+func TestExecuteCronJob_NewPerRunAttachesFreshThread(t *testing.T) {
+	store, err := NewCronStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewCronStore() error = %v", err)
+	}
+	platform := &stubCronReplyTargetPlatform{
+		stubPlatformEngine: stubPlatformEngine{n: "discord"},
+	}
+	agent := &resultAgent{session: newResultAgentSession("done")}
+	e := NewEngine("test", agent, []Platform{platform}, "", LangEnglish)
+	defer e.cancel()
+	e.cronScheduler = NewCronScheduler(store)
+
+	job := &CronJob{
+		ID:          "job-npr",
+		SessionKey:  "discord:channel-1:user-1",
+		Prompt:      "digest",
+		Description: "Digest",
+		SessionMode: "new_per_run",
+	}
+	if err := store.Add(job); err != nil {
+		t.Fatalf("store.Add() error = %v", err)
+	}
+	if err := e.ExecuteCronJob(job); err != nil {
+		t.Fatalf("ExecuteCronJob() error = %v", err)
+	}
+
+	// Replies in the run's thread continue the run's session; the channel's
+	// own active session is left alone.
+	runs := e.sessions.ListSessions("discord:thread-fresh")
+	if len(runs) != 1 {
+		t.Fatalf("fresh thread sessions = %d, want 1", len(runs))
+	}
+	if got := e.sessions.ActiveSessionID("discord:thread-fresh"); got != runs[0].ID {
+		t.Fatalf("fresh thread active session = %q, want run session %q", got, runs[0].ID)
+	}
+	if got := e.sessions.ActiveSessionID("discord:channel-1:user-1"); got != "" {
+		t.Fatalf("base active session = %q, want none", got)
+	}
+}
+
 func TestExecuteCronJob_WorkspacePrefixedSessionKey(t *testing.T) {
 	dir := t.TempDir()
 	store, err := NewCronStore(dir)

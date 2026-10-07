@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 	"time"
 )
@@ -367,7 +368,9 @@ func (sm *SessionManager) AttachSession(userKey string, s *Session) {
 		return
 	}
 	sm.activeSession[userKey] = s.ID
-	sm.userSessions[userKey] = append(sm.userSessions[userKey], s.ID)
+	if !slices.Contains(sm.userSessions[userKey], s.ID) {
+		sm.userSessions[userKey] = append(sm.userSessions[userKey], s.ID)
+	}
 	sm.saveLocked()
 }
 

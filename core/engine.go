@@ -1237,6 +1237,12 @@ func (e *Engine) ExecuteCronJob(job *CronJob) error {
 		if !session.TryLock() {
 			return fmt.Errorf("session %q is busy", runSessionKey)
 		}
+		if runSessionKey != sessionKey {
+			// The run has its own thread, so replies there should continue
+			// this run's session. (Without a fresh thread, the channel's
+			// active session stays the user's own chat.)
+			sessions.AttachSession(runSessionKey, session)
+		}
 		iKey := fmt.Sprintf("%s#cron:%s", runSessionKey, session.ID)
 		if workspaceDir != "" {
 			iKey = workspaceDir + ":" + iKey
