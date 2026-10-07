@@ -1142,6 +1142,16 @@ func (p *Platform) ReconstructReplyCtx(sessionKey string) (any, error) {
 	return rc, nil
 }
 
+// WorkspaceChannelID returns the parent channel for thread session keys, so
+// cron runs bind to the same workspace as messages posted in the thread.
+func (p *Platform) WorkspaceChannelID(sessionKey string) string {
+	channelID, err := parseDiscordSessionKeyChannelID(sessionKey)
+	if err != nil {
+		return ""
+	}
+	return resolveParentChannelID(channelID, sessionThreadOps{session: p.session})
+}
+
 func (p *Platform) ResolveCronReplyTarget(sessionKey string, title string) (string, any, error) {
 	if !p.threadIsolation {
 		return "", nil, core.ErrNotSupported

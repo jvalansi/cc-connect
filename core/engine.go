@@ -1191,6 +1191,14 @@ func (e *Engine) ExecuteCronJob(job *CronJob) error {
 
 	if e.multiWorkspace {
 		channelID := extractChannelID(sessionKey)
+		// Bind by the parent channel like incoming messages do; a thread ID
+		// matches no workspace and would fall back to base_dir.
+		if wr, ok := targetPlatform.(WorkspaceChannelResolver); ok {
+			if id := wr.WorkspaceChannelID(sessionKey); id != "" {
+				channelID = id
+				msg.ChannelKey = id
+			}
+		}
 		if channelID != "" {
 			workspace, _, err := e.resolveWorkspace(targetPlatform, channelID)
 			if err == nil && workspace != "" {
@@ -1243,11 +1251,26 @@ func (e *Engine) ExecuteCronJob(job *CronJob) error {
 		return fmt.Errorf("session %q is busy", sessionKey)
 	}
 
-	iKey := sessionKey
-	if workspaceDir != "" {
-		iKey = workspaceDir + ":" + sessionKey
+	wsKey := func(key string) string {
+		if workspaceDir != "" {
+			return workspaceDir + ":" + key
+		}
+		return key
 	}
-	e.processInteractiveMessageWith(effectivePlatform, msg, session, agent, sessions, iKey, workspaceDir, sessionKey)
+	if runSessionKey != sessionKey {
+		// The run posts into a fresh thread; replies there land under
+		// runSessionKey, so point it at this session and run under it.
+		sessions.AttachSession(runSessionKey, session)
+		// Stop live agents on earlier keys of this session (previous runs'
+		// threads) so they can't continue from stale in-memory context.
+		for _, key := range sessions.KeysWithActiveSession(session.ID) {
+			if key != runSessionKey {
+				e.cleanupInteractiveState(wsKey(key))
+			}
+		}
+		msg.SessionKey = runSessionKey
+	}
+	e.processInteractiveMessageWith(effectivePlatform, msg, session, agent, sessions, wsKey(runSessionKey), workspaceDir, runSessionKey)
 	return nil
 }
 

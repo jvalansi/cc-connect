@@ -42,6 +42,13 @@ type CronReplyTargetResolver interface {
 	ResolveCronReplyTarget(sessionKey string, title string) (resolvedSessionKey string, replyCtx any, err error)
 }
 
+// WorkspaceChannelResolver is an optional interface for platforms whose session
+// keys can name a sub-channel (e.g. a Discord thread) that should share its
+// parent channel's workspace binding. Returns the channel ID to bind by.
+type WorkspaceChannelResolver interface {
+	WorkspaceChannelID(sessionKey string) string
+}
+
 // SessionEnvInjector is an optional interface for agents that accept
 // per-session environment variables (e.g. CC_PROJECT, CC_SESSION_KEY).
 type SessionEnvInjector interface {

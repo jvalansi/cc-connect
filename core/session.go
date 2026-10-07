@@ -356,6 +356,34 @@ func (sm *SessionManager) SwitchToAgentSession(userKey, agentSID, agentName, sum
 	return s
 }
 
+// AttachSession makes s the active session for userKey as well, so messages
+// under either key continue the same conversation. Used when a cron run
+// posts into a fresh thread: replies there must reach the session that
+// produced the post.
+func (sm *SessionManager) AttachSession(userKey string, s *Session) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	if sm.activeSession[userKey] == s.ID {
+		return
+	}
+	sm.activeSession[userKey] = s.ID
+	sm.userSessions[userKey] = append(sm.userSessions[userKey], s.ID)
+	sm.saveLocked()
+}
+
+// KeysWithActiveSession returns every user key whose active session is id.
+func (sm *SessionManager) KeysWithActiveSession(id string) []string {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	var keys []string
+	for userKey, sid := range sm.activeSession {
+		if sid == id {
+			keys = append(keys, userKey)
+		}
+	}
+	return keys
+}
+
 func (sm *SessionManager) ListSessions(userKey string) []*Session {
 	sm.mu.RLock()
 	defer sm.mu.RUnlock()

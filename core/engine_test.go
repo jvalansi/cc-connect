@@ -10539,11 +10539,13 @@ func TestExecuteCronJob_ResolvesCronReplyTarget(t *testing.T) {
 		t.Fatalf("sent[1] = %q, want final result", sent[1])
 	}
 
-	if got := len(e.sessions.ListSessions("discord:thread-fresh")); got != 0 {
-		t.Fatalf("fresh session count = %d, want 0 for reuse mode", got)
-	}
+	// Reuse mode: replies in the fresh thread must continue the cron's session.
 	if got := len(e.sessions.ListSessions("discord:channel-1:user-1")); got != 1 {
 		t.Fatalf("base session count = %d, want 1", got)
+	}
+	baseID := e.sessions.ActiveSessionID("discord:channel-1:user-1")
+	if got := e.sessions.ActiveSessionID("discord:thread-fresh"); got != baseID {
+		t.Fatalf("fresh thread active session = %q, want cron session %q", got, baseID)
 	}
 	if job.SessionKey != "discord:channel-1:user-1" {
 		t.Fatalf("job.SessionKey = %q, want unchanged base session key", job.SessionKey)
