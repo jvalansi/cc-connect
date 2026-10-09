@@ -20,6 +20,9 @@ func TestIsAuthError(t *testing.T) {
 		"Failed to authenticate. API Error: 401 OAuth access token has expired. Re-authenticate to continue.",
 		"Failed to authenticate. API Error: 401 Invalid authentication credentials",
 		"Invalid API key · Please run /login",
+		"Failed to authenticate: OAuth session expired and could not be refreshed",
+		"Failed to authenticate: OAuth token revoked. Please log in again or contact your administrator.",
+		"Authentication required · Sign in again to continue",
 		"API Error: 401 {\"type\":\"error\"}",
 	}
 	for _, msg := range authErrors {
@@ -33,6 +36,7 @@ func TestIsAuthError(t *testing.T) {
 		"API Error: 429 rate limit exceeded",
 		"read stdout: file already closed",
 		"Session not found",
+		"Authentication error · This may be a temporary network issue, please try again",
 		"",
 	}
 	for _, msg := range notAuthErrors {

@@ -25,10 +25,16 @@ import (
 //
 //	Failed to authenticate. API Error: 401 OAuth access token has expired. Re-authenticate to continue.
 //	Failed to authenticate. API Error: 401 Invalid authentication credentials
+//	Failed to authenticate: OAuth session expired and could not be refreshed
+//	Failed to authenticate: OAuth token revoked. Please log in again or contact your administrator.
+//	Authentication required · Sign in again to continue
 var authErrorMarkers = []string{
 	"api error: 401",
 	"oauth token has expired",
 	"oauth access token has expired",
+	"oauth session expired",
+	"oauth token revoked",
+	"sign in again to continue",
 	"invalid authentication credentials",
 	"invalid api key",
 	"please run /login",
