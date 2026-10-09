@@ -67,6 +67,19 @@ func (e *Engine) authErrorHint(agent Agent, errMsg string) (string, bool) {
 	return e.i18n.T(MsgAuthExpired), true
 }
 
+// withAuthFallback appends a pointer to /auth to an error the agent did not
+// recognize as a credential failure, so a sign-in problem reported in wording
+// the markers don't cover still leaves the user a way out. agent may be nil.
+func (e *Engine) withAuthFallback(agent Agent, userMsg string) string {
+	if agent == nil {
+		agent = e.agent
+	}
+	if _, ok := agent.(AgentReauthenticator); !ok {
+		return userMsg
+	}
+	return userMsg + "\n\n" + e.i18n.T(MsgAuthFallback)
+}
+
 // cmdAuth implements /auth: start a re-authentication flow, submit the code
 // the user pasted back, or cancel an attempt in progress.
 func (e *Engine) cmdAuth(p Platform, msg *Message, args []string) {

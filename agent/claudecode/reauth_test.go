@@ -91,6 +91,9 @@ func TestHandleResult_NonAuthErrorStaysAResult(t *testing.T) {
 	if evt.Type != core.EventResult {
 		t.Fatalf("event type = %v, want EventResult", evt.Type)
 	}
+	if strings.Contains(evt.Content, "/auth") {
+		t.Fatalf("content = %q, a normal answer must not get the /auth hint", evt.Content)
+	}
 }
 
 func TestHandleResult_ErrorWithoutAuthMarkerStaysAResult(t *testing.T) {
@@ -110,6 +113,9 @@ func TestHandleResult_ErrorWithoutAuthMarkerStaysAResult(t *testing.T) {
 	evt := <-cs.events
 	if evt.Type != core.EventResult {
 		t.Fatalf("event type = %v, want EventResult", evt.Type)
+	}
+	if !strings.Contains(evt.Content, "/auth") {
+		t.Fatalf("content = %q, want the /auth fallback hint", evt.Content)
 	}
 }
 

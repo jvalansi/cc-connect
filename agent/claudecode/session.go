@@ -448,13 +448,19 @@ func (cs *claudeSession) handleResult(raw map[string]any) {
 	// are re-raised as error events for the engine to handle. Gated on
 	// is_error so a turn where the agent merely *reports* a 401 from some
 	// third-party API is left alone.
-	if isErr, _ := raw["is_error"].(bool); isErr && isAuthErrorText(content) {
+	isErr, _ := raw["is_error"].(bool)
+	if isErr && isAuthErrorText(content) {
 		evt := core.Event{Type: core.EventError, Error: fmt.Errorf("%s", strings.TrimSpace(content))}
 		select {
 		case cs.events <- evt:
 		case <-cs.ctx.Done():
 		}
 		return
+	}
+	// Any other CLI failure is still relayed, but with a pointer to /auth in
+	// case it is a credential failure in wording the markers don't cover yet.
+	if isErr && strings.TrimSpace(content) != "" {
+		content += "\n\n" + authFallbackHint
 	}
 
 	var inputTokens, outputTokens int

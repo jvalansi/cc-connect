@@ -40,6 +40,9 @@ var authErrorMarkers = []string{
 	"please run /login",
 }
 
+// authFallbackHint is appended to CLI failures that match no marker above.
+const authFallbackHint = "If this is a sign-in problem, send /auth to sign in again."
+
 // reauthURLPattern finds the authorization URL the CLI prints for the user.
 var reauthURLPattern = regexp.MustCompile(`https://\S+`)
 

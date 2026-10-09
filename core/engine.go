@@ -3430,7 +3430,7 @@ func (e *Engine) runUnsolicitedReader(ctx context.Context, cancel context.Cancel
 					state.mu.Lock()
 					stateAgent := state.agent
 					state.mu.Unlock()
-					userMsg := fmt.Sprintf(e.i18n.T(MsgError), errMsg)
+					userMsg := e.withAuthFallback(stateAgent, fmt.Sprintf(e.i18n.T(MsgError), errMsg))
 					if hint, ok := e.authErrorHint(stateAgent, errMsg); ok {
 						userMsg = hint
 					}
@@ -4372,6 +4372,7 @@ func (e *Engine) processInteractiveEvents(state *interactiveState, session *Sess
 					// instead of relaying a raw provider error.
 					userMsg = hint
 				} else {
+					userMsg = e.withAuthFallback(stateAgent, userMsg)
 					for _, h := range agentErrorHandlers {
 						if strings.Contains(errMsg, h.contains) {
 							userMsg = e.i18n.T(h.msgKey)

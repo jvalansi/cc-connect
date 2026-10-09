@@ -142,6 +142,7 @@ const (
 	MsgError                     MsgKey = "error"
 	MsgSessionNotFound           MsgKey = "session_not_found"
 	MsgAuthExpired               MsgKey = "auth_expired"
+	MsgAuthFallback              MsgKey = "auth_fallback"
 	MsgAuthStarted               MsgKey = "auth_started"
 	MsgAuthStartFailed           MsgKey = "auth_start_failed"
 	MsgAuthCodeReceived          MsgKey = "auth_code_received"
@@ -753,6 +754,13 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "🔑 登入已過期。發送 /auth，我會給你一個連結 — 開啟後把驗證碼貼回這裡。",
 		LangJapanese:           "🔑 サインインの有効期限が切れました。/auth を送るとリンクを表示します — 開いてコードをここに貼り付けてください。",
 		LangSpanish:            "🔑 La sesión de inicio caducó. Envía /auth y te daré un enlace — ábrelo y pega aquí el código.",
+	},
+	MsgAuthFallback: {
+		LangEnglish:            "If this is a sign-in problem, send /auth to sign in again.",
+		LangChinese:            "如果是登录问题，发送 /auth 重新登录。",
+		LangTraditionalChinese: "如果是登入問題，發送 /auth 重新登入。",
+		LangJapanese:           "サインインの問題の場合は、/auth を送って再度サインインしてください。",
+		LangSpanish:            "Si es un problema de inicio de sesión, envía /auth para volver a iniciarla.",
 	},
 	MsgAuthStarted: {
 		LangEnglish:            "🔑 Open this link and approve access:\n%s\n\nYou'll be shown a code — paste it back in this thread (or send `/auth <code>`). It is single-use and expires in a few minutes.",
