@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/chenhg5/cc-connect/core"
@@ -25,9 +26,10 @@ func init() {
 const maxDiscordLen = 2000
 
 type replyContext struct {
-	channelID string
-	messageID string
-	threadID  string
+	channelID  string
+	messageID  string
+	threadID   string
+	sessionKey string // session the reply belongs to; recorded on channel posts so a thread opened on them continues it
 }
 
 // interactionReplyCtx handles Discord slash command (Application Command)
@@ -63,8 +65,10 @@ type Platform struct {
 	channelNameCache           sync.Map // channelID -> name
 	botRoleIDs                 sync.Map // guildID -> bot managed role ID
 	readyCh                    chan struct{}
-	seenMsgs                   sync.Map // message ID dedup: prevents duplicate MessageCreate events
-	seenInteractions           sync.Map // interaction ID dedup: prevents duplicate slash/button events
+	seenMsgs                   sync.Map     // message ID dedup: prevents duplicate MessageCreate events
+	sessionAnchors             sync.Map     // bot post / thread ID -> sessionAnchor
+	anchorSweptAt              atomic.Int64 // unix time of the last expired-anchor sweep
+	seenInteractions           sync.Map     // interaction ID dedup: prevents duplicate slash/button events
 	self                       core.Platform
 
 	// Gateway health. discordgo reports a connection as open as soon as it
@@ -215,6 +219,82 @@ func rememberDedupID(store *sync.Map, id string) bool {
 	}
 	time.AfterFunc(2*time.Minute, func() { store.Delete(id) })
 	return true
+}
+
+// sessionAnchorTTL bounds how long after a bot post a thread opened on it
+// (or a reply to it) still continues the session that wrote it. Anchors live
+// in memory only, so a restart forgets them and such threads start fresh.
+const sessionAnchorTTL = 7 * 24 * time.Hour
+
+type sessionAnchor struct {
+	sessionKey string
+	at         time.Time
+}
+
+// anchorSession records that messages keyed by id (a bot post's message ID,
+// which is also the ID of any thread opened on it, or a thread already routed
+// to a session) continue sessionKey.
+func (p *Platform) anchorSession(id, sessionKey string) {
+	if id == "" || sessionKey == "" {
+		return
+	}
+	now := time.Now()
+	p.sessionAnchors.Store(id, sessionAnchor{sessionKey: sessionKey, at: now})
+	if last := p.anchorSweptAt.Load(); now.Unix()-last > 3600 && p.anchorSweptAt.CompareAndSwap(last, now.Unix()) {
+		p.sessionAnchors.Range(func(k, v any) bool {
+			if now.Sub(v.(sessionAnchor).at) > sessionAnchorTTL {
+				p.sessionAnchors.Delete(k)
+			}
+			return true
+		})
+	}
+}
+
+// rememberBotMessage anchors a bot post in a channel to the session that
+// wrote it. Posts inside a thread are skipped: they already share that
+// thread's session.
+func (p *Platform) rememberBotMessage(rc replyContext, messageID string) {
+	if rc.threadID != "" {
+		return
+	}
+	p.anchorSession(messageID, rc.sessionKey)
+}
+
+// anchoredSessionKey returns the session m continues: that of the thread it
+// is in (a thread opened on a bot post shares the post's ID), or that of the
+// bot post it replies to in the same channel.
+func (p *Platform) anchoredSessionKey(m *discordgo.MessageCreate) string {
+	ids := []string{m.ChannelID}
+	if ref := m.MessageReference; ref != nil && ref.Type == discordgo.MessageReferenceTypeDefault &&
+		(ref.ChannelID == "" || ref.ChannelID == m.ChannelID) {
+		ids = append(ids, ref.MessageID)
+	}
+	userID := ""
+	if m.Author != nil {
+		userID = m.Author.ID
+	}
+	return p.anchorFor(userID, ids...)
+}
+
+// anchorFor returns the session anchored to the first of ids that has one.
+// A per-user session is only continued by that same user.
+func (p *Platform) anchorFor(userID string, ids ...string) string {
+	for _, id := range ids {
+		v, ok := p.sessionAnchors.Load(id)
+		if !ok {
+			continue
+		}
+		a := v.(sessionAnchor)
+		if time.Since(a.at) > sessionAnchorTTL {
+			continue
+		}
+		parts := strings.SplitN(a.sessionKey, ":", 3)
+		if len(parts) == 3 && parts[2] != userID {
+			continue
+		}
+		return a.sessionKey
+	}
+	return ""
 }
 
 func buildSessionKey(channelID string, userID string, shareSessionInChannel bool) string {
@@ -670,7 +750,7 @@ func (p *Platform) handleMessageCreate(s *discordgo.Session, m *discordgo.Messag
 	slog.Debug("discord: message received", "user", m.Author.Username, "channel", m.ChannelID)
 
 	sessionKey := p.makeSessionKey(m.ChannelID, m.Author.ID)
-	rctx := replyContext{channelID: m.ChannelID, messageID: m.ID}
+	rctx := replyContext{channelID: m.ChannelID, messageID: m.ID, sessionKey: sessionKey}
 	// channelKey pins workspace binding to the parent channel even when
 	// thread_isolation rewrites SessionKey to a thread ID. Without it,
 	// effectiveChannelID() would extract the thread ID from SessionKey
@@ -687,6 +767,16 @@ func (p *Platform) handleMessageCreate(s *discordgo.Session, m *discordgo.Messag
 			rctx = threadCtx
 			channelKey = parentChannelID
 		}
+	}
+
+	// A thread opened on (or a reply to) a bot post continues the session
+	// that wrote it; replies still go where this message came from.
+	if anchored := p.anchoredSessionKey(m); anchored != "" && anchored != sessionKey {
+		if rctx.threadID != "" { // never anchor a main channel to one session
+			p.anchorSession(rctx.targetChannelID(), anchored)
+		}
+		sessionKey = anchored
+		rctx.sessionKey = anchored
 	}
 
 	images, files, audio := classifyAttachments(m.Attachments, downloadURL)
@@ -774,6 +864,9 @@ func (p *Platform) handleInteraction(s *discordgo.Session, i *discordgo.Interact
 
 	ops := sessionThreadOps{session: p.session}
 	sessionKey := resolveSessionKeyForChannel(channelID, userID, p.shareSessionInChannel, p.threadIsolation, ops)
+	if anchored := p.anchorFor(userID, channelID); anchored != "" {
+		sessionKey = anchored
+	}
 	channelKey := ""
 	if p.threadIsolation {
 		channelKey = resolveParentChannelID(channelID, ops)
@@ -847,6 +940,9 @@ func (p *Platform) handleComponentInteraction(s *discordgo.Session, i *discordgo
 	channelID := i.ChannelID
 	ops := sessionThreadOps{session: p.session}
 	sessionKey := resolveSessionKeyForChannel(channelID, userID, p.shareSessionInChannel, p.threadIsolation, ops)
+	if anchored := p.anchorFor(userID, channelID); anchored != "" {
+		sessionKey = anchored
+	}
 	channelKey := ""
 	if p.threadIsolation {
 		channelKey = resolveParentChannelID(channelID, ops)
@@ -926,16 +1022,18 @@ func (p *Platform) sendInteraction(ictx *interactionReplyCtx, content string) er
 func (p *Platform) sendChannelReply(rc replyContext, content string) error {
 	chunks := core.SplitMessageCodeFenceAware(wrapTablesInCodeBlocks(content), maxDiscordLen)
 	for _, chunk := range chunks {
+		var sent *discordgo.Message
 		var err error
 		if rc.useThreadChannel() || rc.messageID == "" {
-			_, err = p.session.ChannelMessageSend(rc.targetChannelID(), chunk)
+			sent, err = p.session.ChannelMessageSend(rc.targetChannelID(), chunk)
 		} else {
 			ref := &discordgo.MessageReference{MessageID: rc.messageID}
-			_, err = p.session.ChannelMessageSendReply(rc.channelID, chunk, ref)
+			sent, err = p.session.ChannelMessageSendReply(rc.channelID, chunk, ref)
 		}
 		if err != nil {
 			return fmt.Errorf("discord: send: %w", err)
 		}
+		p.rememberBotMessage(rc, sent.ID)
 	}
 	return nil
 }
@@ -943,10 +1041,11 @@ func (p *Platform) sendChannelReply(rc replyContext, content string) error {
 func (p *Platform) sendChannel(rc replyContext, content string) error {
 	chunks := core.SplitMessageCodeFenceAware(wrapTablesInCodeBlocks(content), maxDiscordLen)
 	for _, chunk := range chunks {
-		_, err := p.session.ChannelMessageSend(rc.targetChannelID(), chunk)
+		sent, err := p.session.ChannelMessageSend(rc.targetChannelID(), chunk)
 		if err != nil {
 			return fmt.Errorf("discord: send: %w", err)
 		}
+		p.rememberBotMessage(rc, sent.ID)
 	}
 	return nil
 }
@@ -1135,7 +1234,7 @@ func (p *Platform) ReconstructReplyCtx(sessionKey string) (any, error) {
 	if len(parts) < 2 || parts[0] != "discord" {
 		return nil, fmt.Errorf("discord: invalid session key %q", sessionKey)
 	}
-	rc := replyContext{channelID: parts[1]}
+	rc := replyContext{channelID: parts[1], sessionKey: sessionKey}
 	if len(parts) == 2 {
 		rc.threadID = parts[1]
 	}
@@ -1172,11 +1271,12 @@ type discordPreviewHandle struct {
 // SendPreviewStart sends a new message and returns a handle for subsequent edits.
 func (p *Platform) SendPreviewStart(ctx context.Context, rctx any, content string) (any, error) {
 	var channelID string
-	switch rc := rctx.(type) {
+	var rc replyContext
+	switch c := rctx.(type) {
 	case replyContext:
-		channelID = rc.targetChannelID()
+		channelID, rc = c.targetChannelID(), c
 	case *interactionReplyCtx:
-		channelID = rc.channelID
+		channelID = c.channelID
 	default:
 		return nil, fmt.Errorf("discord: invalid reply context type %T", rctx)
 	}
@@ -1186,6 +1286,7 @@ func (p *Platform) SendPreviewStart(ctx context.Context, rctx any, content strin
 	if err != nil {
 		return nil, fmt.Errorf("discord: send preview: %w", err)
 	}
+	p.rememberBotMessage(rc, sent.ID)
 	return &discordPreviewHandle{channelID: channelID, messageID: sent.ID}, nil
 }
 

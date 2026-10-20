@@ -1370,3 +1370,33 @@ func TestClassifyAttachments_SkipsFailedDownloadsButKeepsSiblings(t *testing.T) 
 		t.Fatalf("files = %+v, want only good.pdf", files)
 	}
 }
+
+func TestAnchoredSessionKey_ThreadOnBotPostOrReply(t *testing.T) {
+	p := &Platform{}
+	p.rememberBotMessage(replyContext{channelID: "chan", sessionKey: "discord:chan:user"}, "botmsg")
+	p.rememberBotMessage(replyContext{channelID: "thr", threadID: "thr", sessionKey: "discord:thr"}, "inthread")
+	user := &discordgo.User{ID: "user"}
+
+	inThread := &discordgo.MessageCreate{Message: &discordgo.Message{ChannelID: "botmsg", Author: user}}
+	if got := p.anchoredSessionKey(inThread); got != "discord:chan:user" {
+		t.Fatalf("thread on bot post: session = %q", got)
+	}
+	other := &discordgo.MessageCreate{Message: &discordgo.Message{ChannelID: "botmsg", Author: &discordgo.User{ID: "other"}}}
+	if got := p.anchoredSessionKey(other); got != "" {
+		t.Fatalf("another user's session must not be continued, got %q", got)
+	}
+	reply := &discordgo.MessageCreate{Message: &discordgo.Message{ChannelID: "chan", Author: user,
+		MessageReference: &discordgo.MessageReference{MessageID: "botmsg", ChannelID: "chan"}}}
+	if got := p.anchoredSessionKey(reply); got != "discord:chan:user" {
+		t.Fatalf("reply to bot post: session = %q", got)
+	}
+	forward := &discordgo.MessageCreate{Message: &discordgo.Message{ChannelID: "elsewhere", Author: user,
+		MessageReference: &discordgo.MessageReference{MessageID: "botmsg", ChannelID: "chan", Type: discordgo.MessageReferenceTypeForward}}}
+	if got := p.anchoredSessionKey(forward); got != "" {
+		t.Fatalf("forwarded bot post must not be continued, got %q", got)
+	}
+	threadPost := &discordgo.MessageCreate{Message: &discordgo.Message{ChannelID: "inthread", Author: user}}
+	if got := p.anchoredSessionKey(threadPost); got != "" {
+		t.Fatalf("posts inside a thread must not be recorded, got %q", got)
+	}
+}
