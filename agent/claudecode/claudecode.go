@@ -1294,9 +1294,9 @@ func findProjectDir(homeDir, absWorkDir string) string {
 // starts, so the engine's StartSession fallback never fires).
 //
 // It returns true ONLY when the project directory is located but the
-// <sessionID>.jsonl file is absent. When the project dir can't be resolved
-// (unknown encoding, missing dir), it returns false so a genuinely valid
-// resume is never wrongly skipped.
+// <sessionID>.jsonl file is absent from it and from every other project dir.
+// When the project dir can't be resolved (unknown encoding, missing dir), it
+// returns false so a genuinely valid resume is never wrongly skipped.
 func resumeTranscriptMissing(workDir, sessionID string) bool {
 	if sessionID == "" || sessionID == core.ContinueSession {
 		return false
@@ -1313,8 +1313,11 @@ func resumeTranscriptMissing(workDir, sessionID string) bool {
 	if projectDir == "" {
 		return false
 	}
-	if _, err := os.Stat(filepath.Join(projectDir, sessionID+".jsonl")); os.IsNotExist(err) {
-		return true
+	if _, err := os.Stat(filepath.Join(projectDir, sessionID+".jsonl")); !os.IsNotExist(err) {
+		return false
 	}
-	return false
+	// `claude --resume <id>` also finds a session started in another directory
+	// (e.g. one an external process ran and a tagged post handed over).
+	elsewhere, _ := filepath.Glob(filepath.Join(filepath.Dir(projectDir), "*", sessionID+".jsonl"))
+	return len(elsewhere) == 0
 }

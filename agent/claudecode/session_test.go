@@ -308,12 +308,22 @@ func TestResumeTranscriptMissing(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	foreign := "33333333-3333-3333-3333-333333333333"
+	otherDir := filepath.Join(home, ".claude", "projects", "-elsewhere")
+	if err := os.MkdirAll(otherDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(otherDir, foreign+".jsonl"), []byte("{}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
 	cases := []struct {
 		name      string
 		sessionID string
 		want      bool
 	}{
 		{"live transcript exists", live, false},
+		{"transcript under another project dir", foreign, false},
 		{"transcript deleted", "22222222-2222-2222-2222-222222222222", true},
 		{"empty is fresh", "", false},
 		{"continue is not a resume", core.ContinueSession, false},

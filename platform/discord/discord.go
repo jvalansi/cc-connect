@@ -30,6 +30,9 @@ type replyContext struct {
 	messageID  string
 	threadID   string
 	sessionKey string // session the reply belongs to; recorded on channel posts so a thread opened on them continues it
+	// agentSessionID, set by TagAgentSession, is recorded on channel posts
+	// instead of sessionKey: a thread opened on them resumes that agent session.
+	agentSessionID string
 }
 
 // interactionReplyCtx handles Discord slash command (Application Command)
@@ -227,19 +230,28 @@ func rememberDedupID(store *sync.Map, id string) bool {
 const sessionAnchorTTL = 7 * 24 * time.Hour
 
 type sessionAnchor struct {
-	sessionKey string
-	at         time.Time
+	sessionKey     string
+	agentSessionID string // set instead of sessionKey: a thread opened on the post resumes this agent session
+	at             time.Time
 }
 
 // anchorSession records that messages keyed by id (a bot post's message ID,
 // which is also the ID of any thread opened on it, or a thread already routed
 // to a session) continue sessionKey.
 func (p *Platform) anchorSession(id, sessionKey string) {
-	if id == "" || sessionKey == "" {
+	if sessionKey == "" {
+		return
+	}
+	p.storeAnchor(id, sessionAnchor{sessionKey: sessionKey})
+}
+
+func (p *Platform) storeAnchor(id string, a sessionAnchor) {
+	if id == "" {
 		return
 	}
 	now := time.Now()
-	p.sessionAnchors.Store(id, sessionAnchor{sessionKey: sessionKey, at: now})
+	a.at = now
+	p.sessionAnchors.Store(id, a)
 	if last := p.anchorSweptAt.Load(); now.Unix()-last > 3600 && p.anchorSweptAt.CompareAndSwap(last, now.Unix()) {
 		p.sessionAnchors.Range(func(k, v any) bool {
 			if now.Sub(v.(sessionAnchor).at) > sessionAnchorTTL {
@@ -257,35 +269,83 @@ func (p *Platform) rememberBotMessage(rc replyContext, messageID string) {
 	if rc.threadID != "" {
 		return
 	}
+	if rc.agentSessionID != "" {
+		p.storeAnchor(messageID, sessionAnchor{sessionKey: rc.sessionKey, agentSessionID: rc.agentSessionID})
+		return
+	}
 	p.anchorSession(messageID, rc.sessionKey)
+}
+
+// TagAgentSession implements core.AgentSessionTagger.
+func (p *Platform) TagAgentSession(rctx any, agentSessionID string) (any, error) {
+	rc, ok := rctx.(replyContext)
+	if !ok {
+		return nil, fmt.Errorf("discord: cannot tag a %T post", rctx)
+	}
+	return tagAgentSession(rc, agentSessionID, sessionThreadOps{session: p.session})
+}
+
+// tagAgentSession marks rc's posts so a thread opened on them resumes
+// agentSessionID. A reconstructed "discord:<id>" key can't tell a thread from
+// a shared-session channel, so a thread target is checked: posts inside a
+// thread can't have threads opened on them.
+func tagAgentSession(rc replyContext, agentSessionID string, ops discordThreadOps) (replyContext, error) {
+	if rc.threadID != "" {
+		ch, err := ops.ResolveChannel(rc.threadID)
+		if err != nil {
+			return rc, fmt.Errorf("discord: resolve post target %s: %w", rc.threadID, err)
+		}
+		if isThreadChannelType(ch.Type) {
+			return rc, fmt.Errorf("discord: post target %s is a thread", rc.threadID)
+		}
+		rc.threadID = ""
+	}
+	rc.agentSessionID = agentSessionID
+	return rc, nil
+}
+
+// agentSessionAnchor returns the agent session a thread opened on a tagged
+// post (thread ID == post ID) resumes.
+func (p *Platform) agentSessionAnchor(threadID string) string {
+	v, ok := p.sessionAnchors.Load(threadID)
+	if !ok {
+		return ""
+	}
+	a := v.(sessionAnchor)
+	if time.Since(a.at) > sessionAnchorTTL {
+		return ""
+	}
+	return a.agentSessionID
 }
 
 // anchoredSessionKey returns the session m continues: that of the thread it
 // is in (a thread opened on a bot post shares the post's ID), or that of the
 // bot post it replies to in the same channel.
 func (p *Platform) anchoredSessionKey(m *discordgo.MessageCreate) string {
-	ids := []string{m.ChannelID}
+	var replyTo []string
 	if ref := m.MessageReference; ref != nil && ref.Type == discordgo.MessageReferenceTypeDefault &&
 		(ref.ChannelID == "" || ref.ChannelID == m.ChannelID) {
-		ids = append(ids, ref.MessageID)
+		replyTo = append(replyTo, ref.MessageID)
 	}
 	userID := ""
 	if m.Author != nil {
 		userID = m.Author.ID
 	}
-	return p.anchorFor(userID, ids...)
+	return p.anchorFor(userID, m.ChannelID, replyTo...)
 }
 
-// anchorFor returns the session anchored to the first of ids that has one.
-// A per-user session is only continued by that same user.
-func (p *Platform) anchorFor(userID string, ids ...string) string {
-	for _, id := range ids {
+// anchorFor returns the session anchored to channelID (a thread opened on a
+// bot post), else to the first of replyTo that has one. A per-user session is
+// only continued by that same user. A thread on a post tagged with an agent
+// session resumes that instead (see agentSessionAnchor), so it isn't routed.
+func (p *Platform) anchorFor(userID, channelID string, replyTo ...string) string {
+	for i, id := range append([]string{channelID}, replyTo...) {
 		v, ok := p.sessionAnchors.Load(id)
 		if !ok {
 			continue
 		}
 		a := v.(sessionAnchor)
-		if time.Since(a.at) > sessionAnchorTTL {
+		if a.sessionKey == "" || (i == 0 && a.agentSessionID != "") || time.Since(a.at) > sessionAnchorTTL {
 			continue
 		}
 		parts := strings.SplitN(a.sessionKey, ":", 3)
@@ -791,6 +851,10 @@ func (p *Platform) handleMessageCreate(s *discordgo.Session, m *discordgo.Messag
 		UserID:    m.Author.ID, UserName: m.Author.Username,
 		ChatName: p.resolveChannelName(m.ChannelID),
 		Content:  m.Content, Images: images, Files: files, Audio: audio, ReplyCtx: rctx,
+	}
+	// Only the thread's shared session resumes it, never per-user ones.
+	if rctx.threadID != "" && sessionKey == buildThreadSessionKey(m.ChannelID) {
+		msg.ResumeAgentSessionID = p.agentSessionAnchor(m.ChannelID)
 	}
 	p.dispatchMessage(msg)
 }

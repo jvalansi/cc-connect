@@ -1400,3 +1400,48 @@ func TestAnchoredSessionKey_ThreadOnBotPostOrReply(t *testing.T) {
 		t.Fatalf("posts inside a thread must not be recorded, got %q", got)
 	}
 }
+
+type channelTypeOps struct {
+	discordThreadOps
+	typ discordgo.ChannelType
+}
+
+func (o channelTypeOps) ResolveChannel(id string) (*discordgo.Channel, error) {
+	return &discordgo.Channel{ID: id, Type: o.typ}, nil
+}
+
+func TestAgentSessionAnchor_ThreadOnTaggedPostResumesIt(t *testing.T) {
+	p := &Platform{}
+	// "discord:chan" reconstructs with threadID set even for a plain channel.
+	rc, err := tagAgentSession(replyContext{channelID: "chan", threadID: "chan", sessionKey: "discord:chan"}, "agent-123", channelTypeOps{typ: discordgo.ChannelTypeGuildText})
+	if err != nil {
+		t.Fatalf("tag channel post: %v", err)
+	}
+	p.rememberBotMessage(rc, "tagged")
+
+	user := &discordgo.User{ID: "user"}
+	inThread := &discordgo.MessageCreate{Message: &discordgo.Message{ChannelID: "tagged", Author: user}}
+	if got := p.anchoredSessionKey(inThread); got != "" {
+		t.Fatalf("a tagged post must not route the thread to the poster's session, got %q", got)
+	}
+	if got := p.agentSessionAnchor("tagged"); got != "agent-123" {
+		t.Fatalf("thread on tagged post: agent session = %q", got)
+	}
+	reply := &discordgo.MessageCreate{Message: &discordgo.Message{ChannelID: "chan", Author: user,
+		MessageReference: &discordgo.MessageReference{MessageID: "tagged", ChannelID: "chan"}}}
+	if got := p.anchoredSessionKey(reply); got != "discord:chan" {
+		t.Fatalf("in-channel reply to a tagged post continues the poster's session, got %q", got)
+	}
+
+	p.rememberBotMessage(replyContext{channelID: "chan", sessionKey: "discord:chan:user"}, "plain")
+	if got := p.agentSessionAnchor("plain"); got != "" {
+		t.Fatalf("untagged post has no agent session, got %q", got)
+	}
+	if got := p.anchoredSessionKey(&discordgo.MessageCreate{Message: &discordgo.Message{ChannelID: "plain", Author: user}}); got != "discord:chan:user" {
+		t.Fatalf("session anchors must still work, got %q", got)
+	}
+
+	if _, err := tagAgentSession(replyContext{channelID: "thr", threadID: "thr"}, "agent-123", channelTypeOps{typ: discordgo.ChannelTypeGuildPublicThread}); err == nil {
+		t.Fatal("a post inside a real thread can't be tagged")
+	}
+}

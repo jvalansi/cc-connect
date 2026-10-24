@@ -155,6 +155,9 @@ type Message struct {
 	ReplyCtx     any                 // platform-specific context needed for replying
 	FromVoice    bool                // true if message originated from voice transcription
 	ModeOverride string              // if set, temporarily override agent permission mode for this message
+	// ResumeAgentSessionID, if set, is the agent session this message's session
+	// resumes when it has none yet (a thread opened on a tagged post).
+	ResumeAgentSessionID string
 }
 
 // EventType distinguishes different kinds of agent output.

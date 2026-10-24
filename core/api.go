@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sync"
 	"time"
 )
@@ -33,7 +34,13 @@ type SendRequest struct {
 	Message    string            `json:"message"`
 	Images     []ImageAttachment `json:"images,omitempty"`
 	Files      []FileAttachment  `json:"files,omitempty"`
+	// AgentSessionID, when set, makes a thread opened on the posted message
+	// resume this agent session (e.g. one an external process ran) instead of
+	// starting fresh.
+	AgentSessionID string `json:"agent_session_id,omitempty"`
 }
+
+var agentSessionIDPattern = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 
 // NewAPIServer creates an API server on a Unix socket.
 func NewAPIServer(dataDir string) (*APIServer, error) {
@@ -145,6 +152,11 @@ func (s *APIServer) handleSend(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "message or attachment is required", http.StatusBadRequest)
 		return
 	}
+	// It ends up in a file path and on the agent's command line.
+	if req.AgentSessionID != "" && !agentSessionIDPattern.MatchString(req.AgentSessionID) {
+		http.Error(w, "agent_session_id must be a UUID", http.StatusBadRequest)
+		return
+	}
 
 	s.mu.RLock()
 	engine, ok := s.engines[req.Project]
@@ -167,7 +179,7 @@ func (s *APIServer) handleSend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := engine.SendToSessionWithAttachments(req.SessionKey, req.Message, req.Images, req.Files); err != nil {
+	if err := engine.SendToSessionAs(req.SessionKey, req.Message, req.Images, req.Files, req.AgentSessionID); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}

@@ -160,6 +160,23 @@ func (s *Session) CompareAndSetAgentSessionID(id, agentType string) bool {
 	return true
 }
 
+// AdoptAgentSessionID sets id only on a session that has never had an agent
+// session, so a handed-over session can't override one the user started or
+// cleared (/new records the old ID as past).
+func (s *Session) AdoptAgentSessionID(id, agentType string) bool {
+	if id == "" || id == ContinueSession {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if (s.AgentSessionID != "" && s.AgentSessionID != ContinueSession) || len(s.PastAgentSessionIDs) > 0 {
+		return false
+	}
+	s.AgentSessionID = id
+	s.AgentType = agentType
+	return true
+}
+
 func (s *Session) stripContinueSessionSentinel() {
 	s.mu.Lock()
 	if s.AgentSessionID == ContinueSession {

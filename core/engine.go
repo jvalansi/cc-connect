@@ -2185,6 +2185,12 @@ sessionLocked:
 	if rotated := e.maybeAutoResetSessionOnIdle(p, msg, sessions, interactiveKey, session); rotated != nil {
 		session = rotated
 	}
+	// Only the key's first session adopts it, so /new and idle resets stick.
+	if msg.ResumeAgentSessionID != "" && len(sessions.ListSessions(msg.SessionKey)) == 1 &&
+		session.AdoptAgentSessionID(msg.ResumeAgentSessionID, agent.Name()) {
+		slog.Info("resuming tagged agent session", "session_key", msg.SessionKey, "agent_session", msg.ResumeAgentSessionID)
+		sessions.Save()
+	}
 
 	// Ensure an interactiveState entry exists before launching the async
 	// processor so messages arriving during session startup can be queued
@@ -8635,6 +8641,12 @@ func (e *Engine) SendToSession(sessionKey, message string) error {
 }
 
 func (e *Engine) SendToSessionWithAttachments(sessionKey, message string, images []ImageAttachment, files []FileAttachment) error {
+	return e.SendToSessionAs(sessionKey, message, images, files, "")
+}
+
+// SendToSessionAs is SendToSessionWithAttachments with the posts tagged so a
+// thread opened on them resumes agentSessionID (ignored when empty).
+func (e *Engine) SendToSessionAs(sessionKey, message string, images []ImageAttachment, files []FileAttachment, agentSessionID string) error {
 	e.interactiveMu.Lock()
 
 	var state *interactiveState
@@ -8723,6 +8735,17 @@ func (e *Engine) SendToSessionWithAttachments(sessionKey, message string, images
 	}
 	if (len(images) > 0 || len(files) > 0) && !e.attachmentSendEnabled {
 		return ErrAttachmentSendDisabled
+	}
+
+	// The tag is best-effort: an untagged post beats a lost one.
+	if agentSessionID != "" {
+		if tagger, ok := p.(AgentSessionTagger); !ok {
+			slog.Warn("send: platform can't tag posts with an agent session, sending untagged", "platform", p.Name())
+		} else if tagged, err := tagger.TagAgentSession(replyCtx, agentSessionID); err != nil {
+			slog.Warn("send: sending untagged", "agent_session", agentSessionID, "error", err)
+		} else {
+			replyCtx = tagged
+		}
 	}
 
 	var imageSender ImageSender

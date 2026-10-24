@@ -25,6 +25,14 @@ type ReplyContextReconstructor interface {
 	ReconstructReplyCtx(sessionKey string) (any, error)
 }
 
+// AgentSessionTagger is an optional interface for platforms that can mark a
+// proactive post so a thread later opened on it resumes the given agent
+// session. It returns a copy of rctx carrying the tag, or an error when the
+// post can't carry one.
+type AgentSessionTagger interface {
+	TagAgentSession(rctx any, agentSessionID string) (any, error)
+}
+
 // MessageRecallDetector is an optional interface for platforms that can check
 // whether the message targeted by a reply context was recalled/deleted.
 type MessageRecallDetector interface {

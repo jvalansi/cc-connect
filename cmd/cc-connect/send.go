@@ -107,6 +107,12 @@ func parseSendArgs(args []string) (core.SendRequest, string, error) {
 			}
 			i++
 			filePaths = append(filePaths, args[i])
+		case "--agent-session":
+			if i+1 >= len(args) {
+				return req, "", fmt.Errorf("--agent-session requires a value")
+			}
+			i++
+			req.AgentSessionID = args[i]
 		case "--stdin":
 			useStdin = true
 		case "--data-dir":
@@ -259,6 +265,7 @@ Options:
       --stdin              Read message from stdin (best for long/special-char messages)
   -p, --project <name>     Target project (optional if only one project)
   -s, --session <key>      Target session key (optional, picks first active)
+      --agent-session <id> A thread opened on this post resumes agent session <id>
       --data-dir <path>    Data directory (default: ~/.cc-connect)
   -h, --help               Show this help
 

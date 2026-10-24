@@ -75,6 +75,19 @@ func TestParseSendArgs_UsesSessionEnvFallback(t *testing.T) {
 	}
 }
 
+func TestParseSendArgs_AgentSession(t *testing.T) {
+	req, _, err := parseSendArgs([]string{"--agent-session", "abc-123", "-m", "hi"})
+	if err != nil {
+		t.Fatalf("parseSendArgs returned error: %v", err)
+	}
+	if req.AgentSessionID != "abc-123" {
+		t.Fatalf("agent session = %q, want abc-123", req.AgentSessionID)
+	}
+	if _, _, err := parseSendArgs([]string{"-m", "hi", "--agent-session"}); err == nil {
+		t.Fatal("--agent-session without a value must fail")
+	}
+}
+
 func TestDetectAttachmentMimeType_UsesExtensionFallback(t *testing.T) {
 	mimeType := detectAttachmentMimeType("note.md", []byte("plain"))
 	if mimeType != "text/markdown; charset=utf-8" && mimeType != "text/markdown" {

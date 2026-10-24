@@ -931,3 +931,17 @@ func TestLegacyData_ClearsAfterFirstNewCommand(t *testing.T) {
 		t.Fatal("thread-new should be in known as current ID")
 	}
 }
+
+func TestAdoptAgentSessionID_OnlyNeverUsedSessions(t *testing.T) {
+	s := &Session{}
+	if !s.AdoptAgentSessionID("handed-over", "claudecode") || s.GetAgentSessionID() != "handed-over" {
+		t.Fatalf("fresh session must adopt, got %q", s.GetAgentSessionID())
+	}
+	if s.AdoptAgentSessionID("other", "claudecode") {
+		t.Fatal("must not replace a live agent session")
+	}
+	s.SetAgentSessionID("", "") // /new
+	if s.AdoptAgentSessionID("handed-over", "claudecode") {
+		t.Fatal("must not resurrect after the user cleared the session")
+	}
+}
