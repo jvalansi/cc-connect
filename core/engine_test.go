@@ -12123,3 +12123,23 @@ func TestBtwAlias_ResolvesToPs(t *testing.T) {
 		t.Fatalf("matchPrefix(\"ps\") = %q, want \"ps\"", id2)
 	}
 }
+
+func TestHandleMessage_StarterContentOnlyOnFreshSession(t *testing.T) {
+	p := &stubPlatformEngine{n: "test"}
+	e := NewEngine("test", &stubAgent{}, []Platform{p}, "", LangEnglish)
+
+	fresh := &Message{SessionKey: "test:thr1", ReplyCtx: "ctx", Content: "let's respond",
+		StarterContent: "[post] reply from Sonya", Platform: "test", UserID: "u1"}
+	e.handleMessage(p, fresh)
+	if !strings.HasPrefix(fresh.Content, "[post] reply from Sonya") || !strings.Contains(fresh.Content, "let's respond") {
+		t.Fatalf("fresh session: content = %q, want starter prepended", fresh.Content)
+	}
+
+	e.sessions.GetOrCreateActive("test:thr2").AddHistory("user", "earlier turn")
+	resumed := &Message{SessionKey: "test:thr2", ReplyCtx: "ctx", Content: "follow up",
+		StarterContent: "[post] reply from Sonya", Platform: "test", UserID: "u1"}
+	e.handleMessage(p, resumed)
+	if strings.Contains(resumed.Content, "[post]") {
+		t.Fatalf("session with history: content = %q, starter must not repeat", resumed.Content)
+	}
+}

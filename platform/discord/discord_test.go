@@ -1445,3 +1445,32 @@ func TestAgentSessionAnchor_ThreadOnTaggedPostResumesIt(t *testing.T) {
 		t.Fatal("a post inside a real thread can't be tagged")
 	}
 }
+
+func TestUnanchoredStarter_BotPostWithoutSession(t *testing.T) {
+	p := &Platform{botID: "bot"}
+	bot, user := &discordgo.User{ID: "bot"}, &discordgo.User{ID: "user"}
+
+	reply := &discordgo.MessageCreate{Message: &discordgo.Message{ID: "m1", ChannelID: "chan", Author: user,
+		MessageReference:  &discordgo.MessageReference{MessageID: "botmsg", ChannelID: "chan"},
+		ReferencedMessage: &discordgo.Message{Author: bot, Type: discordgo.MessageTypeReply, Content: "📬 Reply on: Sonya"}}}
+	if got := p.unanchoredStarter(reply, "m1", "chan"); !strings.Contains(got, "📬 Reply on: Sonya") {
+		t.Fatalf("reply to bot post: starter = %q", got)
+	}
+	// A new thread on the user's own message: nothing to fetch (p.session is nil).
+	own := &discordgo.MessageCreate{Message: &discordgo.Message{ID: "m2", ChannelID: "chan", Author: user}}
+	if got := p.unanchoredStarter(own, "m2", "chan"); got != "" {
+		t.Fatalf("thread on own message: starter = %q", got)
+	}
+	// Thread opened on a post: the fetched post is cached per thread.
+	p.storeStarter("post1", starterContext(&discordgo.Message{Author: bot, Content: "tracker post"}, "bot"))
+	inThread := &discordgo.MessageCreate{Message: &discordgo.Message{ChannelID: "post1", Author: user}}
+	if got := p.unanchoredStarter(inThread, "post1", "chan"); !strings.Contains(got, "tracker post") {
+		t.Fatalf("thread on bot post: starter = %q", got)
+	}
+	if got := starterContext(&discordgo.Message{Author: user, Content: "my own message"}, "bot"); got != "" {
+		t.Fatalf("non-bot post must not be quoted, got %q", got)
+	}
+	if got := starterContext(&discordgo.Message{Author: bot}, "bot"); got != "" {
+		t.Fatalf("empty post must not be quoted, got %q", got)
+	}
+}

@@ -158,6 +158,11 @@ type Message struct {
 	// ResumeAgentSessionID, if set, is the agent session this message's session
 	// resumes when it has none yet (a thread opened on a tagged post).
 	ResumeAgentSessionID string
+	// StarterContent, if set, is the post this message's thread was opened on
+	// (or that it replies to) when no session is anchored to it, e.g. a
+	// script's post. It is prepended only to the key's first, still-empty
+	// session, so the agent sees it once.
+	StarterContent string
 }
 
 // EventType distinguishes different kinds of agent output.

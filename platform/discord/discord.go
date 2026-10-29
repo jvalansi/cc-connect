@@ -70,6 +70,8 @@ type Platform struct {
 	readyCh                    chan struct{}
 	seenMsgs                   sync.Map     // message ID dedup: prevents duplicate MessageCreate events
 	sessionAnchors             sync.Map     // bot post / thread ID -> sessionAnchor
+	starterPosts               sync.Map     // thread ID -> starterPost it was opened on (text "" if not a bot post)
+	starterSweptAt             atomic.Int64 // unix time of the last expired-starter sweep
 	anchorSweptAt              atomic.Int64 // unix time of the last expired-anchor sweep
 	seenInteractions           sync.Map     // interaction ID dedup: prevents duplicate slash/button events
 	self                       core.Platform
@@ -316,6 +318,72 @@ func (p *Platform) agentSessionAnchor(threadID string) string {
 		return ""
 	}
 	return a.agentSessionID
+}
+
+// unanchoredStarter returns the bot post m's fresh thread has no session for,
+// so the agent can see what the user is answering: the bot post m replies
+// to, else the post the thread was opened on (thread ID == post ID). Posts
+// sent straight through the API (scripts, crons) record no anchor, and
+// anchors don't survive a restart.
+func (p *Platform) unanchoredStarter(m *discordgo.MessageCreate, threadID, parentID string) string {
+	if ref := m.MessageReference; ref != nil && ref.Type == discordgo.MessageReferenceTypeDefault &&
+		(ref.ChannelID == "" || ref.ChannelID == m.ChannelID) && m.ReferencedMessage != nil {
+		if c := starterContext(m.ReferencedMessage, p.botID); c != "" {
+			return c
+		}
+	}
+	// A thread started on the user's own message has no post to show.
+	if parentID == "" || parentID == threadID || threadID == m.ID {
+		return ""
+	}
+	if v, ok := p.starterPosts.Load(threadID); ok {
+		return v.(starterPost).text
+	}
+	post, err := p.session.ChannelMessage(parentID, threadID)
+	if err != nil { // not cached, so a transient failure is retried next message
+		slog.Debug("discord: no starter post for thread", "thread", threadID, "error", err)
+		return ""
+	}
+	c := starterContext(post, p.botID)
+	p.storeStarter(threadID, c)
+	return c
+}
+
+type starterPost struct {
+	text string
+	at   time.Time
+}
+
+// storeStarter caches a thread's starter post, sweeping entries older than
+// sessionAnchorTTL at most hourly so the cache stays bounded.
+func (p *Platform) storeStarter(threadID, text string) {
+	now := time.Now()
+	p.starterPosts.Store(threadID, starterPost{text: text, at: now})
+	if last := p.starterSweptAt.Load(); now.Unix()-last > 3600 && p.starterSweptAt.CompareAndSwap(last, now.Unix()) {
+		p.starterPosts.Range(func(k, v any) bool {
+			if now.Sub(v.(starterPost).at) > sessionAnchorTTL {
+				p.starterPosts.Delete(k)
+			}
+			return true
+		})
+	}
+}
+
+// starterContext frames a bot post for the agent, or returns "" if post is
+// not the bot's or has no text.
+func starterContext(post *discordgo.Message, botID string) string {
+	if post == nil || post.Author == nil || post.Author.ID != botID {
+		return ""
+	}
+	text := strings.TrimSpace(post.Content)
+	for _, e := range post.Embeds {
+		text = strings.TrimSpace(text + "\n" + e.Title + "\n" + e.Description)
+	}
+	if text == "" {
+		return ""
+	}
+	return "[The user is responding to this earlier bot post:]\n" +
+		text + "\n[End of post]"
 }
 
 // anchoredSessionKey returns the session m continues: that of the thread it
@@ -831,7 +899,8 @@ func (p *Platform) handleMessageCreate(s *discordgo.Session, m *discordgo.Messag
 
 	// A thread opened on (or a reply to) a bot post continues the session
 	// that wrote it; replies still go where this message came from.
-	if anchored := p.anchoredSessionKey(m); anchored != "" && anchored != sessionKey {
+	anchored := p.anchoredSessionKey(m)
+	if anchored != "" && anchored != sessionKey {
 		if rctx.threadID != "" { // never anchor a main channel to one session
 			p.anchorSession(rctx.targetChannelID(), anchored)
 		}
@@ -855,6 +924,9 @@ func (p *Platform) handleMessageCreate(s *discordgo.Session, m *discordgo.Messag
 	// Only the thread's shared session resumes it, never per-user ones.
 	if rctx.threadID != "" && sessionKey == buildThreadSessionKey(m.ChannelID) {
 		msg.ResumeAgentSessionID = p.agentSessionAnchor(m.ChannelID)
+	}
+	if anchored == "" && msg.ResumeAgentSessionID == "" && rctx.threadID != "" {
+		msg.StarterContent = p.unanchoredStarter(m, rctx.threadID, channelKey)
 	}
 	p.dispatchMessage(msg)
 }

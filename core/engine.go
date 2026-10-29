@@ -2191,6 +2191,12 @@ sessionLocked:
 		slog.Info("resuming tagged agent session", "session_key", msg.SessionKey, "agent_session", msg.ResumeAgentSessionID)
 		sessions.Save()
 	}
+	// Like the resume above, only the key's first session gets it, so /new
+	// and idle resets start clean.
+	if msg.StarterContent != "" && len(sessions.ListSessions(msg.SessionKey)) == 1 &&
+		session.GetAgentSessionID() == "" && len(session.GetHistory(1)) == 0 {
+		msg.Content = msg.StarterContent + "\n\n" + msg.Content
+	}
 
 	// Ensure an interactiveState entry exists before launching the async
 	// processor so messages arriving during session startup can be queued
