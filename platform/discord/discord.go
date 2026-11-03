@@ -856,6 +856,14 @@ func (p *Platform) handleMessageCreate(s *discordgo.Session, m *discordgo.Messag
 	// mention gating, so ordinary chatter does not get refetched later.
 	p.rememberLastSeen(m.ChannelID, m.ID)
 
+	// Only what a user typed. System notices are authored by the user who caused them and carry text: opening a
+	// thread posts one with the thread name in the parent channel (the thread's own messages already reach its
+	// session, so answering it puts a second reply in the parent), renaming a channel posts the new name.
+	if m.Type != discordgo.MessageTypeDefault && m.Type != discordgo.MessageTypeReply {
+		slog.Debug("discord: ignoring system message", "type", m.Type, "channel", m.ChannelID)
+		return
+	}
+
 	// In guild channels, only respond when the bot is @mentioned (unless group_reply_all).
 	// Check both user mentions and role mentions (Discord auto-creates a managed role
 	// for each bot; users may @ the role instead of the user).

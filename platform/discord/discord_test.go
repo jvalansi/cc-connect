@@ -12,6 +12,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/chenhg5/cc-connect/core"
@@ -1472,5 +1473,28 @@ func TestUnanchoredStarter_BotPostWithoutSession(t *testing.T) {
 	}
 	if got := starterContext(&discordgo.Message{Author: bot}, "bot"); got != "" {
 		t.Fatalf("empty post must not be quoted, got %q", got)
+	}
+}
+
+func TestHandleMessageCreate_IgnoresSystemNotices(t *testing.T) {
+	var got []string
+	p := &Platform{botID: "bot", groupReplyAll: true, lastSeenMsgs: map[string]string{},
+		handler: func(_ core.Platform, msg *core.Message) { got = append(got, msg.Content) }}
+	p.channelNameCache.Store("chan", "validation-tool")
+	p.botRoleIDs.Store("guild", "role")
+	send := func(id string, typ discordgo.MessageType, content string) {
+		p.handleMessageCreate(nil, &discordgo.MessageCreate{Message: &discordgo.Message{
+			ID: id, ChannelID: "chan", GuildID: "guild", Type: typ, Content: content, Timestamp: time.Now(),
+			Author: &discordgo.User{ID: "user", Username: "user"}}})
+	}
+	send("1", discordgo.MessageTypeThreadCreated, "**Nightly validation report**") // see the guard in handleMessageCreate
+	send("2", discordgo.MessageTypeChannelNameChange, "validation")
+	send("3", discordgo.MessageTypeDefault, "hello")
+	send("4", discordgo.MessageTypeReply, "answer")
+	if !reflect.DeepEqual(got, []string{"hello", "answer"}) {
+		t.Fatalf("dispatched %q, want only the typed messages", got)
+	}
+	if p.lastSeenMsgs["chan"] != "4" {
+		t.Fatalf("backfill anchor = %q, want the newest message", p.lastSeenMsgs["chan"])
 	}
 }
