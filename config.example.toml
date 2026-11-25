@@ -210,6 +210,16 @@ level = "info" # debug, info, warn, error
 # window_secs = 60          # Window size in seconds (default: 60) / 窗口时间秒数（默认 60）
 
 # =============================================================================
+# Message Queue / 消息队列
+# =============================================================================
+# What happens to a message sent while the agent is still working.
+# 智能体工作期间收到新消息时的处理方式。
+
+# [queue]
+# max_depth = 5              # Max waiting messages per session (default: 5) / 每会话最大排队消息数（默认 5）
+# interrupt = false          # true = stop the running turn and handle the new message (Claude Code only); default: wait / true = 中断当前任务并处理新消息（仅 Claude Code）；默认排队等待
+
+# =============================================================================
 # Outgoing Rate Limit / 出站速率限制
 # Throttle how fast messages are sent TO platforms.
 # Prevents account bans on platforms with strict API rate limits (e.g. WeChat Work).

@@ -635,6 +635,19 @@ func extFromMime(mime string) string {
 	}
 }
 
+// InterruptTurn aborts the turn in progress; the CLI ends it with an
+// error_during_execution result and stays ready for the next message.
+func (cs *claudeSession) InterruptTurn() error {
+	if !cs.alive.Load() {
+		return fmt.Errorf("session process is not running")
+	}
+	return cs.writeJSON(map[string]any{
+		"type":       "control_request",
+		"request_id": fmt.Sprintf("interrupt-%d", time.Now().UnixNano()),
+		"request":    map[string]any{"subtype": "interrupt"},
+	})
+}
+
 // RespondPermission writes a control_response to the Claude process stdin.
 func (cs *claudeSession) RespondPermission(requestID string, result core.PermissionResult) error {
 	if !cs.alive.Load() {

@@ -534,6 +534,14 @@ type WorkspaceAgentOptionSnapshotter interface {
 	WorkspaceAgentOptions() map[string]any
 }
 
+// TurnInterrupter is an optional interface for running agent sessions that can
+// abort the turn in progress while keeping the process and its context alive.
+// The aborted turn must still end with an EventResult, and an interrupt sent
+// while no turn is running must have no effect.
+type TurnInterrupter interface {
+	InterruptTurn() error
+}
+
 // LiveModeSwitcher is an optional interface for running agent sessions that can
 // apply a mode change immediately without restarting the process.
 type LiveModeSwitcher interface {

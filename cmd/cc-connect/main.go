@@ -522,6 +522,9 @@ func main() {
 		if cfg.Queue.MaxDepth != nil && *cfg.Queue.MaxDepth > 0 {
 			engine.SetMaxQueuedMessages(*cfg.Queue.MaxDepth)
 		}
+		if cfg.Queue.Interrupt != nil {
+			engine.SetInterruptOnMessage(*cfg.Queue.Interrupt)
+		}
 
 		// Wire auto-compress settings
 		if proj.AutoCompress.Enabled != nil && *proj.AutoCompress.Enabled {

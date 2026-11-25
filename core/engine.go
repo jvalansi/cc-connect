@@ -27,6 +27,10 @@ import (
 
 const maxPlatformMessageLen = 4000
 const telegramBotCommandLimit = 100
+
+// interruptRetryInterval is the minimum gap between interrupts of one turn.
+const interruptRetryInterval = 200 * time.Millisecond
+
 const defaultMaxQueuedMessages = 5 // default cap for queued messages per session
 
 const (
@@ -229,6 +233,10 @@ type RateLimitCfg struct {
 
 // Engine routes messages between platforms and the agent for a single project.
 type Engine struct {
+	// interruptOnMessage makes a message that arrives mid-turn abort the turn
+	// (agents implementing TurnInterrupter) instead of waiting for it.
+	interruptOnMessage bool
+
 	name                  string
 	agent                 Agent
 	platforms             []Platform
@@ -383,6 +391,11 @@ type interactiveState struct {
 	stopped                bool
 	pending                *pendingPermission
 	pendingMessages        []queuedMessage // messages queued while session was busy
+	inTurn                 bool            // the event loop is running a turn
+	turnActive             bool            // an event of the current turn has been seen and its EventResult has not
+	interrupted            bool            // the current turn was interrupted by a newer message
+	interruptAt            time.Time       // when the last interrupt was sent
+	interruptDone          chan struct{}   // closed once the last interrupt has been written; nil if none
 	approveAll             bool            // when true, auto-approve all permission requests for this session
 	fromVoice              bool            // true if current turn originated from voice transcription
 	sideText               string
@@ -1008,6 +1021,12 @@ func (e *Engine) SetMaxQueuedMessages(n int) {
 	if n > 0 {
 		e.maxQueuedMessages = n
 	}
+}
+
+// SetInterruptOnMessage controls whether a message arriving mid-turn interrupts
+// the running turn. Agents that cannot be interrupted keep queueing.
+func (e *Engine) SetInterruptOnMessage(enabled bool) {
+	e.interruptOnMessage = enabled
 }
 
 func (e *Engine) SetRelayManager(rm *RelayManager) {
@@ -2306,6 +2325,11 @@ func (e *Engine) queueMessageForBusySession(p Platform, msg *Message, interactiv
 		msgSessionKey: msg.SessionKey,
 	})
 	queueDepth := len(state.pendingMessages)
+	notice := MsgMessageQueued
+	if e.canInterrupt(state) {
+		notice = MsgMessageInterrupting
+	}
+	e.interruptForPendingLocked(state)
 	state.mu.Unlock()
 
 	slog.Info("message queued for busy session",
@@ -2313,8 +2337,87 @@ func (e *Engine) queueMessageForBusySession(p Platform, msg *Message, interactiv
 		"user", msg.UserName,
 		"queue_depth", queueDepth,
 	)
-	e.reply(p, msg.ReplyCtx, e.i18n.T(MsgMessageQueued))
+	e.reply(p, msg.ReplyCtx, e.i18n.T(notice))
 	return true
+}
+
+// canInterrupt reports whether a queued message will interrupt the running
+// turn. Must be called with state.mu held.
+func (e *Engine) canInterrupt(state *interactiveState) bool {
+	if !e.interruptOnMessage || !state.inTurn || state.pending != nil {
+		return false
+	}
+	_, ok := state.agentSession.(TurnInterrupter)
+	return ok
+}
+
+// interruptForPendingLocked interrupts the running turn if a message is waiting.
+// Agents may ignore an interrupt that lands before the turn has started, so it
+// is called both when a message is queued and on every event until the turn
+// ends. The write is asynchronous because it can block on the agent's stdin.
+// Must be called with state.mu held.
+func (e *Engine) interruptForPendingLocked(state *interactiveState) {
+	if !state.turnActive || len(state.pendingMessages) == 0 || !e.canInterrupt(state) ||
+		time.Since(state.interruptAt) < interruptRetryInterval {
+		return
+	}
+	if state.interruptDone != nil {
+		select {
+		case <-state.interruptDone:
+		default:
+			return // previous write still in progress
+		}
+	}
+	if !state.interrupted {
+		slog.Info("turn interrupted by newer message")
+	}
+	state.interrupted = true
+	state.interruptAt = time.Now()
+	done := make(chan struct{})
+	state.interruptDone = done
+	interrupter := state.agentSession.(TurnInterrupter)
+	go func() {
+		defer close(done)
+		if err := interrupter.InterruptTurn(); err != nil {
+			slog.Warn("failed to interrupt turn", "error", err)
+		}
+	}()
+}
+
+// waitInterruptWritten blocks until an in-progress interrupt write finishes, so
+// it cannot land after the next turn's prompt and abort that turn instead.
+func (s *interactiveState) waitInterruptWritten() {
+	s.mu.Lock()
+	done := s.interruptDone
+	s.mu.Unlock()
+	if done != nil {
+		<-done
+	}
+}
+
+// takePendingLocked removes the next queued message and returns it with its
+// prompt. In interrupt mode everything waiting becomes one turn, replying to
+// the newest message. Must be called with state.mu held and a non-empty queue.
+func (e *Engine) takePendingLocked(state *interactiveState) (queuedMessage, string) {
+	n := 1
+	if _, ok := state.agentSession.(TurnInterrupter); ok && e.interruptOnMessage {
+		n = len(state.pendingMessages)
+	}
+	batch := state.pendingMessages[:n]
+	state.pendingMessages = state.pendingMessages[n:]
+
+	merged := batch[n-1]
+	merged.images, merged.files, merged.fromVoice = nil, nil, false
+	var contents, prompts []string
+	for _, q := range batch {
+		contents = append(contents, q.content)
+		prompts = append(prompts, e.buildSenderPrompt(q.content, q.userID, q.userName, q.msgPlatform, q.msgSessionKey))
+		merged.images = append(merged.images, q.images...)
+		merged.files = append(merged.files, q.files...)
+		merged.fromVoice = merged.fromVoice || q.fromVoice
+	}
+	merged.content = strings.Join(contents, "\n\n")
+	return merged, strings.Join(prompts, "\n\n")
 }
 
 // ensureInteractiveStateForQueueing creates a placeholder interactiveState
@@ -2741,6 +2844,7 @@ func (e *Engine) processInteractiveMessageWith(p Platform, msg *Message, session
 	// EventPermissionRequest while blocked — the event loop must run in parallel.
 	sendDone := make(chan error, 1)
 	go func() {
+		state.waitInterruptWritten()
 		sendDone <- state.agentSession.Send(promptContent, msg.Images, msg.Files)
 	}()
 
@@ -3519,7 +3623,14 @@ func (e *Engine) processInteractiveEvents(state *interactiveState, session *Sess
 	}
 	sp := newStreamPreview(e.streamPreview, state.platform, state.replyCtx, e.ctx, workspaceRenderer)
 	cp := newCompactProgressWriter(e.ctx, state.platform, state.replyCtx, e.agent.Name(), e.i18n.CurrentLang(), workspaceRenderer)
+	state.inTurn, state.turnActive, state.interrupted = true, false, false
+	state.interruptAt = time.Time{}
 	state.mu.Unlock()
+	defer func() {
+		state.mu.Lock()
+		state.inTurn, state.turnActive = false, false
+		state.mu.Unlock()
+	}()
 
 	// Idle timeout: 0 = disabled
 	var idleTimer *time.Timer
@@ -3528,6 +3639,15 @@ func (e *Engine) processInteractiveEvents(state *interactiveState, session *Sess
 		idleTimer = time.NewTimer(e.eventIdleTimeout)
 		defer idleTimer.Stop()
 		idleCh = idleTimer.C
+	}
+
+	// Resend an interrupt that was lost before a silent stretch (e.g. one long
+	// command), when no event would trigger the retry.
+	var interruptRetry <-chan time.Time
+	if e.interruptOnMessage {
+		ticker := time.NewTicker(time.Second)
+		defer ticker.Stop()
+		interruptRetry = ticker.C
 	}
 
 	events := state.agentSession.Events()
@@ -3563,6 +3683,11 @@ func (e *Engine) processInteractiveEvents(state *interactiveState, session *Sess
 				e.send(p, replyCtx, fmt.Sprintf(e.i18n.T(MsgError), err))
 				return
 			}
+			continue
+		case <-interruptRetry:
+			state.mu.Lock()
+			e.interruptForPendingLocked(state)
+			state.mu.Unlock()
 			continue
 		case <-idleCh:
 			slog.Error("agent session idle timeout: no events for too long, killing session",
@@ -3611,6 +3736,10 @@ func (e *Engine) processInteractiveEvents(state *interactiveState, session *Sess
 
 		state.mu.Lock()
 		p := state.platform
+		// An interrupt sent before the turn starts is lost, so only count the
+		// turn as running once it has produced an event.
+		state.turnActive = event.Type != EventResult
+		e.interruptForPendingLocked(state)
 		state.mu.Unlock()
 
 		// main codebase has no per-session quiet flag; pr309 referenced
@@ -3914,6 +4043,16 @@ func (e *Engine) processInteractiveEvents(state *interactiveState, session *Sess
 			}
 
 		case EventPermissionRequest:
+			// The turn is being aborted, so don't ask the user; deny in case the
+			// interrupt was lost and the agent is still waiting for an answer.
+			state.mu.Lock()
+			interrupted := state.interrupted
+			state.mu.Unlock()
+			if interrupted {
+				_ = state.agentSession.RespondPermission(event.RequestID, PermissionResult{Behavior: "deny"})
+				continue
+			}
+
 			isAskQuestion := event.ToolName == "AskUserQuestion" && len(event.Questions) > 0
 
 			state.mu.Lock()
@@ -3962,6 +4101,11 @@ func (e *Engine) processInteractiveEvents(state *interactiveState, session *Sess
 				Resolved:     make(chan struct{}),
 			}
 			state.mu.Lock()
+			if state.interrupted {
+				state.mu.Unlock()
+				_ = state.agentSession.RespondPermission(event.RequestID, PermissionResult{Behavior: "deny"})
+				continue
+			}
 			state.pending = pending
 			state.mu.Unlock()
 
@@ -4012,6 +4156,9 @@ func (e *Engine) processInteractiveEvents(state *interactiveState, session *Sess
 			// Mark clean exit so unsolicited reader preserves buffered events.
 			state.mu.Lock()
 			state.eventsNeedResync = false
+			interrupted := state.interrupted
+			state.interrupted = false
+			state.interruptAt = time.Time{}
 			state.mu.Unlock()
 
 			fullResponse := event.Content
@@ -4023,7 +4170,13 @@ func (e *Engine) processInteractiveEvents(state *interactiveState, session *Sess
 			} else if fullResponse == "" && len(textParts) > 0 {
 				fullResponse = strings.Join(textParts, "")
 			}
-			if fullResponse == "" {
+			if interrupted && event.Content == "" && segmentStart > 0 {
+				// Earlier segments were already delivered.
+				fullResponse = strings.Join(textParts[segmentStart:], "")
+			}
+			// An interrupted turn usually has nothing left to say.
+			interruptedEmpty := interrupted && strings.TrimSpace(fullResponse) == ""
+			if fullResponse == "" && !interruptedEmpty {
 				fullResponse = e.i18n.T(MsgEmptyResponse)
 			}
 
@@ -4059,10 +4212,12 @@ func (e *Engine) processInteractiveEvents(state *interactiveState, session *Sess
 			//   3. trailing marker with empty strip result   → fully silent
 			// History records the ORIGINAL baseResponse so the agent retains context of its own
 			// decision; only the outbound platform text gets rewritten/suppressed.
-			session.AddHistory("assistant", baseResponse)
-			sessions.Save()
+			if !interruptedEmpty {
+				session.AddHistory("assistant", baseResponse)
+				sessions.Save()
+			}
 
-			isSilent := isSilentReply(baseResponse)
+			isSilent := interruptedEmpty || isSilentReply(baseResponse)
 			if !isSilent {
 				if stripped, ok := stripTrailingSilent(baseResponse); ok {
 					if strings.TrimSpace(stripped) == "" {
@@ -4218,7 +4373,8 @@ func (e *Engine) processInteractiveEvents(state *interactiveState, session *Sess
 			}
 
 			// Auto-compress after finishing a turn, before sending any queued messages.
-			if triggerAutoCompress {
+			// Not after an interrupt: the waiting message must not sit out a compaction.
+			if triggerAutoCompress && !interrupted {
 				compressor, ok := e.agent.(ContextCompressor)
 				if ok && compressor.CompressCommand() != "" {
 					if pendingSend != nil {
@@ -4227,6 +4383,7 @@ func (e *Engine) processInteractiveEvents(state *interactiveState, session *Sess
 						}
 					}
 					state.mu.Lock()
+					state.inTurn = false // compressing is not interruptible
 					state.lastAutoCompressAt = time.Now()
 					tokenEst := state.lastAutoCompressTokens
 					state.mu.Unlock()
@@ -4249,8 +4406,7 @@ func (e *Engine) processInteractiveEvents(state *interactiveState, session *Sess
 			// for the next turn instead of returning.
 			state.mu.Lock()
 			if len(state.pendingMessages) > 0 {
-				queued := state.pendingMessages[0]
-				state.pendingMessages = state.pendingMessages[1:]
+				queued, queuedPrompt := e.takePendingLocked(state)
 				remainingQueue := len(state.pendingMessages)
 				state.platform = queued.platform
 				state.replyCtx = queued.replyCtx
@@ -4281,10 +4437,9 @@ func (e *Engine) processInteractiveEvents(state *interactiveState, session *Sess
 					}
 				}
 
-				queuedPrompt := e.buildSenderPrompt(queued.content, queued.userID, queued.userName, queued.msgPlatform, queued.msgSessionKey)
-
 				nextSend := make(chan error, 1)
 				go func() {
+					state.waitInterruptWritten()
 					nextSend <- state.agentSession.Send(queuedPrompt, queued.images, queued.files)
 				}()
 				pendingSend = nextSend
@@ -4536,8 +4691,12 @@ func (e *Engine) drainPendingMessages(state *interactiveState, session *Session,
 			state.mu.Unlock()
 			return true
 		}
-		queued := state.pendingMessages[0]
-		state.pendingMessages = state.pendingMessages[1:]
+		if state.agentSession == nil || !state.agentSession.Alive() {
+			state.mu.Unlock()
+			e.notifyDroppedQueuedMessages(state, fmt.Errorf("agent session ended"))
+			return false
+		}
+		queued, prompt := e.takePendingLocked(state)
 		state.platform = queued.platform
 		state.replyCtx = queued.replyCtx
 		state.currentMessageID = queued.messageID
@@ -4545,13 +4704,6 @@ func (e *Engine) drainPendingMessages(state *interactiveState, session *Session,
 		state.mu.Unlock()
 
 		e.i18n.DetectAndSet(queued.content)
-		prompt := e.buildSenderPrompt(queued.content, queued.userID, queued.userName, queued.msgPlatform, queued.msgSessionKey)
-
-		if state.agentSession == nil || !state.agentSession.Alive() {
-			e.send(queued.platform, queued.replyCtx, fmt.Sprintf(e.i18n.T(MsgError), "agent session ended"))
-			e.notifyDroppedQueuedMessages(state, fmt.Errorf("agent session ended"))
-			return false
-		}
 
 		drainEvents(state.agentSession.Events())
 
@@ -4559,6 +4711,7 @@ func (e *Engine) drainPendingMessages(state *interactiveState, session *Session,
 
 		sendDone := make(chan error, 1)
 		go func() {
+			state.waitInterruptWritten()
 			sendDone <- state.agentSession.Send(prompt, queued.images, queued.files)
 		}()
 
@@ -8007,6 +8160,7 @@ func (e *Engine) runCompress(state *interactiveState, session *Session, sessions
 	}
 
 	cmd := compressor.CompressCommand()
+	state.waitInterruptWritten()
 	if err := state.agentSession.Send(cmd, nil, nil); err != nil {
 		if !auto {
 			e.reply(p, replyCtx, fmt.Sprintf(e.i18n.T(MsgError), err))

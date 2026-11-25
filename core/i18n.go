@@ -133,6 +133,7 @@ const (
 	MsgPreviousProcessing        MsgKey = "previous_processing"
 	MsgQueueFull                 MsgKey = "queue_full"
 	MsgMessageQueued             MsgKey = "message_queued"
+	MsgMessageInterrupting       MsgKey = "message_interrupting"
 	MsgNoToolsAllowed            MsgKey = "no_tools_allowed"
 	MsgCurrentTools              MsgKey = "current_tools"
 	MsgCurrentSession            MsgKey = "current_session"
@@ -677,6 +678,13 @@ var messages = map[MsgKey]map[Language]string{
 		LangTraditionalChinese: "📬 訊息已收到，將在目前任務完成後處理。",
 		LangJapanese:           "📬 メッセージを受信しました。現在のタスク完了後に処理します。",
 		LangSpanish:            "📬 Mensaje recibido — se procesará después de que termine la tarea actual.",
+	},
+	MsgMessageInterrupting: {
+		LangEnglish:            "⏹️ Stopping the current task to read this.",
+		LangChinese:            "⏹️ 正在停止当前任务以处理此消息。",
+		LangTraditionalChinese: "⏹️ 正在停止目前任務以處理此訊息。",
+		LangJapanese:           "⏹️ 現在のタスクを中断して、このメッセージを処理します。",
+		LangSpanish:            "⏹️ Deteniendo la tarea actual para leer este mensaje.",
 	},
 	MsgQueueFull: {
 		LangEnglish:            "📬 Message queue is full (%d pending). Please wait for current tasks to complete.",
